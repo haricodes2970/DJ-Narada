@@ -22,6 +22,7 @@ export type Track = {
   album?: string;
   durationSeconds?: number;
   format?: string;
+  contentHash?: string;
   sizeBytes: number;
 };
 

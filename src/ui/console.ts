@@ -2,6 +2,12 @@ import { TerminalSession, type CliAction } from "../cli/terminal.js";
 import { PlaybackController } from "../player/controller.js";
 import type { PlaybackState } from "../player/types.js";
 import { VlcBackend } from "../player/vlcBackend.js";
+import {
+  planCrossfade,
+  renderCrossfade,
+  type CrossfadeRenderResult,
+  type CrossfadeSettings,
+} from "../mixing/crossfade.js";
 import { buildCatalog, type CatalogResult } from "../library/catalog.js";
 import { applyMode, getModes } from "../library/modes.js";
 import { probeTrack } from "../library/metadata.js";
@@ -40,6 +46,9 @@ export type NaradaConsoleOptions = {
   frameMs?: number;
   autoStartTimer?: boolean;
   playback?: PlaybackController;
+  crossfadeSettings?: CrossfadeSettings;
+  crossfadeCacheDir?: string;
+  crossfadeRenderer?: (plan: ReturnType<typeof planCrossfade>) => Promise<CrossfadeRenderResult>;
 };
 
 function shuffle<T>(items: readonly T[], seed: number): T[] {
@@ -74,6 +83,9 @@ export class NaradaConsole {
   private readonly splashMs: number;
   private readonly autoStartTimer: boolean;
   private readonly playback: PlaybackController | undefined;
+  private readonly crossfadeSettings: CrossfadeSettings;
+  private readonly crossfadeCacheDir: string | undefined;
+  private readonly crossfadeRenderer: ((plan: ReturnType<typeof planCrossfade>) => Promise<CrossfadeRenderResult>) | undefined;
   private readonly state: ConsoleState;
   private lastPlaybackIndex = -1;
   private previousRows: string[] | undefined;
@@ -94,6 +106,9 @@ export class NaradaConsole {
     this.splashMs = options.splashMs ?? 0;
     this.autoStartTimer = options.autoStartTimer ?? true;
     this.playback = options.playback;
+    this.crossfadeSettings = options.crossfadeSettings ?? {};
+    this.crossfadeCacheDir = options.crossfadeCacheDir;
+    this.crossfadeRenderer = options.crossfadeRenderer;
     this.state = createConsoleState({
       libraryRoot: this.libraryRoot,
       tracks: this.catalog.tracks,
@@ -414,8 +429,7 @@ export class NaradaConsole {
         this.shuffleQueue();
         break;
       case "crossfade":
-        this.state.transition = 0.001;
-        this.state.message = "Crossfade preview (synthetic)";
+        this.previewCrossfade();
         break;
       case "info":
         this.state.overlay = "info";
@@ -568,6 +582,36 @@ export class NaradaConsole {
     this.state.message = result.explanation;
   }
 
+  private previewCrossfade(): void {
+    const from = currentTrack(this.state);
+    if (from === undefined || this.state.queue.length < 2) {
+      this.state.message = "Need at least two queued tracks for a crossfade";
+      return;
+    }
+    const to = this.state.queue[(this.state.queueIndex + 1) % this.state.queue.length];
+    const plan = planCrossfade(from, to, this.crossfadeSettings);
+    if (!plan.enabled) {
+      this.state.message = `Crossfade unavailable: ${plan.reason}`;
+      this.state.transition = 0;
+      return;
+    }
+    this.state.transition = 0.001;
+    this.state.message = `Rendering ${plan.durationSeconds.toFixed(1)}s crossfade…`;
+    this.render();
+    const render = this.crossfadeRenderer ?? ((candidate: ReturnType<typeof planCrossfade>) =>
+      renderCrossfade(candidate, { cacheDir: this.crossfadeCacheDir }));
+    void render(plan).then((result) => {
+      if (result.ok) {
+        this.state.message = `Crossfade ready: ${plan.durationSeconds.toFixed(1)}s ${result.cached ? "(cache)" : "(rendered)"}`;
+        this.state.transition = 0.001;
+      } else {
+        this.state.message = `Crossfade fallback: ${result.reason}`;
+        this.state.transition = 0;
+      }
+      this.render();
+    });
+  }
+
   private startPlaybackIfNeeded(): void {
     if (this.playback === undefined) {
       this.state.playback = this.state.tracks.length > 0 ? "playing" : "stopped";
@@ -619,6 +663,9 @@ export type RunConsoleOptions = {
   autoStartTimer?: boolean;
   playback?: PlaybackController;
   enablePlayback?: boolean;
+  crossfadeSettings?: CrossfadeSettings;
+  crossfadeCacheDir?: string;
+  crossfadeRenderer?: (plan: ReturnType<typeof planCrossfade>) => Promise<CrossfadeRenderResult>;
   loadCatalog?: (root: string) => Promise<CatalogResult>;
 };
 
@@ -654,6 +701,9 @@ export async function runConsole(options: RunConsoleOptions): Promise<number> {
     splashMs: options.splashMs ?? 900,
     autoStartTimer: options.autoStartTimer ?? true,
     playback,
+    crossfadeSettings: options.crossfadeSettings,
+    crossfadeCacheDir: options.crossfadeCacheDir,
+    crossfadeRenderer: options.crossfadeRenderer,
   });
 
   await console.run();

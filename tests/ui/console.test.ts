@@ -5,6 +5,7 @@ import { TerminalSession, type TerminalInput, type TerminalOutput } from "../../
 import type { Track } from "../../src/library/types.js";
 import { PlaybackController } from "../../src/player/controller.js";
 import { DummyBackend } from "../../src/player/dummyBackend.js";
+import type { CrossfadeRenderResult } from "../../src/mixing/crossfade.js";
 import { NaradaConsole } from "../../src/ui/console.js";
 import { EMBER_THEME } from "../../src/ui/theme.js";
 
@@ -91,6 +92,7 @@ function setup(options: {
   splashMs?: number;
   frameMs?: number;
   playback?: PlaybackController;
+  crossfadeRenderer?: (plan: unknown) => Promise<CrossfadeRenderResult>;
 } = {}) {
   const input = new FakeInput();
   const output = new FakeOutput();
@@ -108,6 +110,7 @@ function setup(options: {
     frameMs: options.frameMs ?? 90,
     autoStartTimer: false,
     playback: options.playback,
+    crossfadeRenderer: options.crossfadeRenderer as never,
   });
   return { input, output, terminal, console };
 }
@@ -178,6 +181,28 @@ test("console drives a real playback controller when attached", async () => {
   assert.ok(backend.calls.includes("volume:75"));
 
   await playback.close();
+});
+
+test("crossfade key renders a cached transition preview", async () => {
+  let calls = 0;
+  const { console } = setup({
+    crossfadeRenderer: async (plan) => {
+      calls += 1;
+      return {
+        ok: true,
+        path: "/tmp/transition.wav",
+        cached: true,
+        durationSeconds: (plan as { durationSeconds: number }).durationSeconds,
+        plan: plan as never,
+      };
+    },
+  });
+  console.start();
+  console.dispatch("crossfade", "x");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls, 1);
+  assert.match(console.getState().message, /Crossfade ready/);
+  assert.equal(console.getState().transition > 0, true);
 });
 
 test("search overlay accepts text and applies a filter", () => {
