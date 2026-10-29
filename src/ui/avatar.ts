@@ -147,10 +147,8 @@ function drawSign(grid: PixelGrid, options: AvatarOptions): void {
   const { state, tick } = options;
   const blink = state === "boot" ? tick % 6 < 3 : state === "error" ? tick % 4 < 2 : true;
   const borderColor = state === "error" ? RED : blink ? EMBER : DEEP;
-  const textColor = state === "paused" ? STEEL : blink ? AMBER : DEEP;
   grid.frame(3, 1, 26, 7, borderColor);
   grid.rect(4, 2, 24, 5, PANEL);
-  if (blink) grid.text(6, 2, "NARADA", textColor);
   if (state === "mixing") {
     const width = 22;
     const filled = Math.round(clamp01(options.transitionProgress) * width);

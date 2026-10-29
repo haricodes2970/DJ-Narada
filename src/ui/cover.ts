@@ -19,6 +19,13 @@ export function hashString(value: string): number {
   return hash >>> 0;
 }
 
+function randomFrom(seed: number): (index: number) => number {
+  return (index: number): number => {
+    const value = Math.sin((seed % 100000) + index * 97.13) * 43758.5453;
+    return value - Math.floor(value);
+  };
+}
+
 /**
  * Deterministic fallback cover art.
  *
@@ -28,39 +35,47 @@ export function hashString(value: string): number {
 export function createProceduralCover(track: Track, width = 16, height = 16): PixelGrid {
   const grid = new PixelGrid(width, height);
   const seed = hashString(`${track.title}|${track.artist ?? ""}|${track.album ?? ""}`);
-  const random = (index: number): number => {
-    const value = Math.sin((seed % 100000) + index * 97.13) * 43758.5453;
-    return value - Math.floor(value);
-  };
+  const random = randomFrom(seed);
 
+  // Night-sky gradient.
+  const horizon = Math.max(5, Math.floor(height * 0.64));
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const diagonal = (x + y + (seed % 5)) % 7;
-      const color = diagonal < 2 ? DEEP : diagonal < 5 ? PANEL : BG;
-      grid.set(x, y, color);
+      const band = y < horizon ? PANEL : DEEP;
+      grid.set(x, y, (x + y + seed) % 9 === 0 ? SHADOW : band);
     }
   }
 
-  // Large offset circle.
-  const centerX = Math.floor(random(1) * width);
-  const centerY = Math.floor(random(2) * height);
-  const radius = 3 + Math.floor(random(3) * 3);
-  grid.circle(centerX, centerY, radius, EMBER, false);
-  grid.circle(centerX, centerY, Math.max(1, radius - 2), AMBER, false);
-
-  // Horizon line and sun.
-  const horizon = Math.floor(height * 0.62);
-  for (let x = 0; x < width; x += 1) {
-    if ((x + seed) % 3 !== 0) grid.set(x, horizon, DEEP);
+  // Retro sun with a sliced lower half.
+  const sunX = Math.floor(width * (0.35 + random(1) * 0.3));
+  const sunY = Math.max(4, horizon - 3);
+  const radius = Math.max(3, Math.floor(Math.min(width, height) * 0.28));
+  grid.circle(sunX, sunY, radius, AMBER);
+  grid.circle(sunX, sunY, Math.max(1, radius - 2), EMBER);
+  for (let offset = 1; offset < radius; offset += 3) {
+    for (let x = sunX - radius; x <= sunX + radius; x += 1) {
+      grid.set(x, sunY + offset, DEEP);
+    }
   }
-  const sunX = Math.floor(width / 2 + (random(4) - 0.5) * width * 0.4);
-  grid.circle(sunX, horizon - 2, 2, MINT);
 
   // Stars.
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 12; index += 1) {
     const x = Math.floor(random(10 + index) * width);
-    const y = Math.floor(random(20 + index) * horizon);
-    grid.set(x, y, index % 4 === 0 ? WHITE : index % 3 === 0 ? AMBER : SHADOW);
+    const y = Math.floor(random(30 + index) * Math.max(1, horizon - 2));
+    grid.set(x, y, index % 5 === 0 ? WHITE : index % 3 === 0 ? MINT : SHADOW);
+  }
+
+  // Horizon and simple mountain silhouettes.
+  for (let x = 0; x < width; x += 1) grid.set(x, horizon, SHADOW);
+  for (let index = 0; index < 3; index += 1) {
+    const peakX = Math.floor(random(50 + index) * width);
+    const peakHeight = 2 + Math.floor(random(60 + index) * 3);
+    for (let step = 0; step < peakHeight; step += 1) {
+      const half = peakHeight - step;
+      for (let x = peakX - half; x <= peakX + half; x += 1) {
+        if (x >= 0 && x < width) grid.set(x, horizon - step, index % 2 === 0 ? SHADOW : DEEP);
+      }
+    }
   }
 
   // Bottom label bars, like a tiny sleeve.
@@ -69,6 +84,6 @@ export function createProceduralCover(track: Track, width = 16, height = 16): Pi
   grid.rect(2 + Math.floor(width * 0.5), height - 2, Math.max(1, Math.floor(width * 0.25)), 1, AMBER);
 
   // Frame.
-  grid.frame(0, 0, width, height, EMBER);
+  grid.frame(0, 0, width, height, AMBER);
   return grid;
 }

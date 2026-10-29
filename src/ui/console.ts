@@ -207,14 +207,21 @@ export class NaradaConsole {
       }),
       this.theme,
     );
-    const title = "◈ N A R A D A";
+    const neon = "N A R A D A";
+    if (rect.width >= neon.length + 2) {
+      screen.text(rect.x + Math.floor((rect.width - neon.length) / 2), rect.y + 1, neon, {
+        fg: this.theme.amber,
+        bold: true,
+      });
+    }
+    const title = "◈ TERMINAL RADIO";
     screen.text(
       Math.floor((layout.columns - title.length) / 2),
       Math.min(layout.rows - 4, rect.y + rect.height + 1),
       title,
       { fg: this.theme.ember, bold: true },
     );
-    const subtitle = "TERMINAL RADIO · COSMIC DJ SAGE";
+    const subtitle = "COSMIC DJ SAGE · LOCAL LIBRARY";
     screen.text(
       Math.floor((layout.columns - subtitle.length) / 2),
       Math.min(layout.rows - 3, rect.y + rect.height + 2),

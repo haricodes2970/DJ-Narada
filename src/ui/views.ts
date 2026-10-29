@@ -206,11 +206,21 @@ export function renderNowPlaying(screen: ScreenBuffer, layout: Layout, state: Co
     theme,
   );
 
+  // A crisp terminal-text neon sign sits on top of the pixel frame. The
+  // 3x5 pixel font is intentionally tiny; this keeps the name readable.
+  const sign = "N A R A D A";
+  if (avatarWidth >= width(sign) + 2) {
+    screen.text(avatarX + Math.floor((avatarWidth - width(sign)) / 2), avatarY + 1, sign, {
+      fg: theme.amber,
+      bold: true,
+    });
+  }
+
   const infoY = avatarY + avatarHeight + 1;
   const hasInfo = infoY + 3 < inner.y + inner.height;
   if (hasInfo) {
-    const coverWidth = Math.min(12, Math.max(6, Math.floor(inner.width * 0.2)));
-    const coverHeight = Math.max(3, Math.floor(coverWidth / 2));
+    const coverHeight = Math.max(3, Math.min(8, Math.floor(inner.height * 0.2)));
+    const coverWidth = Math.max(6, coverHeight * 2);
     const coverX = inner.x;
     drawPixelGrid(
       screen,
@@ -240,13 +250,12 @@ export function renderNowPlaying(screen: ScreenBuffer, layout: Layout, state: Co
   if (inner.height >= 14) {
     const spectrumY = progressY - 2;
     const bars = Math.max(8, Math.min(24, Math.floor(inner.width / 2)));
-    const barWidthPx = Math.max(1, Math.floor(inner.width / bars));
     for (let index = 0; index < bars; index += 1) {
       const wave = Math.abs(Math.sin(state.tick / 5 + index * 0.7));
       const level = Math.max(0, Math.min(1, state.energy * 0.65 + wave * 0.35));
       const char = SPECTRUM[Math.min(SPECTRUM.length - 1, Math.floor(level * SPECTRUM.length))];
-      const x = inner.x + index * barWidthPx;
-      screen.text(x, spectrumY, char.repeat(barWidthPx), { fg: index % 5 === 0 ? theme.amber : theme.ember });
+      const x = inner.x + index * 2;
+      screen.text(x, spectrumY, char, { fg: index % 5 === 0 ? theme.amber : theme.ember });
     }
   }
 }
