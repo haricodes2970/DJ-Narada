@@ -1,6 +1,8 @@
 import { ArgumentError, parseArgs } from "./commands.js";
 import { DEFAULT_LIBRARY_ROOT, resolveDatabasePath } from "../config/paths.js";
 import type { DuplicateGroup } from "../db/tracks.js";
+import { storedTrackToTrack } from "../db/tracks.js";
+import { analyzeTracksWithCache, type AnalyzeTracksSummary } from "../analysis/cache.js";
 import { buildCatalog } from "../library/catalog.js";
 import { probeTrack } from "../library/metadata.js";
 import { scanLibrary } from "../library/scanner.js";
@@ -31,6 +33,7 @@ export type MainDependencies = {
   libraryScan?: (options: { root: string; databasePath?: string }) => Promise<LibraryScanSummary>;
   libraryStatus?: (options: { databasePath?: string; root?: string; includeTracks?: boolean }) => Promise<LibraryStatusSummary>;
   libraryDuplicates?: (options: { databasePath?: string; root?: string }) => Promise<DuplicateGroup[]>;
+  analyzeTracks?: (tracks: readonly Track[], options: { databasePath?: string }) => Promise<AnalyzeTracksSummary>;
 };
 
 export const HELP_TEXT = `Narada DJ — terminal-native local DJ
@@ -44,6 +47,8 @@ Usage:
   narada library scan
   narada library status
   narada library duplicates
+  narada library analyze
+  narada analyze
   narada console               interactive console (TTY only)
   narada demo                  console with a synthetic demo clock (TTY only)
   narada                       same as narada console
@@ -51,7 +56,8 @@ Usage:
 Commands:
   scan      Scan into SQLite and print a summary (alias of library scan)
   search    Search title, artist, album, filename, and path
-  library   scan | status | duplicates
+  library   scan | status | duplicates | analyze
+  analyze   Analyze present tracks and cache audio features
   console   Open the Narada terminal console
   demo      Open the console with synthetic playback and animation
 
@@ -83,6 +89,7 @@ function defaultDependencies(): MainDependencies {
     libraryScan: (options) => scanLibraryToDatabase(options),
     libraryStatus: (options) => libraryStatus(options),
     libraryDuplicates: (options) => libraryDuplicates(options),
+    analyzeTracks: (tracks, options) => analyzeTracksWithCache(tracks, { databasePath: options.databasePath }),
   };
 }
 
@@ -156,8 +163,30 @@ async function runScan(root: string, deps: MainDependencies): Promise<number> {
   return 0;
 }
 
+async function runAnalyze(root: string, deps: MainDependencies): Promise<number> {
+  if (deps.libraryStatus === undefined || deps.analyzeTracks === undefined) {
+    deps.stderr.write("Analysis support is unavailable in this build.\n");
+    return 2;
+  }
+  const status = await deps.libraryStatus({ databasePath: deps.databasePath, root, includeTracks: true });
+  if (!status.exists) {
+    deps.stdout.write(`No library database at ${status.databasePath}. Run: narada library scan\n`);
+    return 0;
+  }
+  const tracks = status.tracks.map(storedTrackToTrack);
+  if (tracks.length === 0) {
+    deps.stdout.write("No present tracks to analyze.\n");
+    return 0;
+  }
+  deps.stdout.write(`Analyzing ${tracks.length} track(s)…\n`);
+  const summary = await deps.analyzeTracks(tracks, { databasePath: deps.databasePath });
+  deps.stdout.write(`Analyzed: ${summary.analyzed} · Cached: ${summary.cached} · Failed: ${summary.failed}\n`);
+  writeWarnings(deps, summary.warnings);
+  return summary.failed > 0 ? 1 : 0;
+}
+
 async function runLibrary(
-  action: "scan" | "status" | "duplicates",
+  action: "scan" | "status" | "duplicates" | "analyze",
   root: string,
   deps: MainDependencies,
 ): Promise<number> {
@@ -170,6 +199,8 @@ async function runLibrary(
     writeScanSummary(deps, summary);
     return 0;
   }
+
+  if (action === "analyze") return runAnalyze(root, deps);
 
   if (action === "duplicates") {
     if (deps.libraryDuplicates === undefined) {
@@ -263,6 +294,8 @@ export async function run(
       return runSearch(options.libraryRoot, options.query, dependencies);
     case "library":
       return runLibrary(options.action, options.libraryRoot, dependencies);
+    case "analyze":
+      return runAnalyze(options.libraryRoot, dependencies);
     case "console":
     case "demo": {
       if (dependencies.consoleRunner === undefined) {

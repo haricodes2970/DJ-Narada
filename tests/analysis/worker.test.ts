@@ -132,6 +132,25 @@ test("timeout terminates the worker and returns a warning", async () => {
   });
 });
 
+test("abort signal terminates the worker and returns a warning", async () => {
+  await withFixture(async (root) => {
+    const audio = path.join(root, "abort.mp3");
+    await fs.writeFile(audio, "audio");
+    const script = await worker(root, "abort.mjs", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);\n");
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 50);
+    const result = await probeAudio(audio, {
+      executable: process.execPath,
+      workerScript: script,
+      timeoutMs: 5_000,
+      signal: controller.signal,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.match(result.warning.message, /aborted/);
+  });
+});
+
 test("stdout bound terminates the worker and returns a warning", async () => {
   await withFixture(async (root) => {
     const audio = path.join(root, "stdout.mp3");

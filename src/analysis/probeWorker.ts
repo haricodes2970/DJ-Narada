@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 
+import { normalizeAudioFeatures } from "./features.js";
 import type { AudioFeatures, AudioProbeOptions, AudioProbeResult } from "./types.js";
 
 export const DEFAULT_AUDIO_PROBE_TIMEOUT_MS = 30000;
@@ -18,34 +19,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function normalizeFeatures(value: unknown): AudioFeatures | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const record = value as Record<string, unknown>;
-  const durationSeconds = record.durationSeconds;
-  const sampleRate = record.sampleRate;
-  const channels = record.channels;
-  const tempoBpm = record.tempoBpm;
-  const rmsEnergy = record.rmsEnergy;
-  const spectralCentroidHz = record.spectralCentroidHz;
-  const zeroCrossingRate = record.zeroCrossingRate;
-  if (
-    !isFiniteNumber(durationSeconds) ||
-    !isFiniteNumber(sampleRate) ||
-    !isFiniteNumber(channels) ||
-    !isFiniteNumber(tempoBpm) ||
-    !isFiniteNumber(rmsEnergy) ||
-    !isFiniteNumber(spectralCentroidHz) ||
-    !isFiniteNumber(zeroCrossingRate)
-  ) {
-    return undefined;
-  }
-  return { durationSeconds, sampleRate, channels, tempoBpm, rmsEnergy, spectralCentroidHz, zeroCrossingRate };
-}
-
 export async function probeAudio(filePath: string, options: AudioProbeOptions = {}): Promise<AudioProbeResult> {
   let canonicalPath: string;
   try {
@@ -56,10 +29,14 @@ export async function probeAudio(filePath: string, options: AudioProbeOptions = 
   }
   const executable = options.executable ?? "python3";
   const workerScript = options.workerScript ?? path.resolve(DEFAULT_WORKER_SCRIPT);
+  if (options.signal?.aborted) {
+    return { ok: false, warning: { path: canonicalPath, message: "audio analysis aborted" } };
+  }
   return runWorker(executable, [workerScript, canonicalPath], canonicalPath, {
     timeoutMs: options.timeoutMs ?? DEFAULT_AUDIO_PROBE_TIMEOUT_MS,
     maxStdoutBytes: options.maxStdoutBytes ?? DEFAULT_AUDIO_MAX_STDOUT_BYTES,
     maxStderrBytes: options.maxStderrBytes ?? DEFAULT_AUDIO_MAX_STDERR_BYTES,
+    signal: options.signal,
   });
 }
 
@@ -67,7 +44,7 @@ function runWorker(
   executable: string,
   args: readonly string[],
   canonicalPath: string,
-  limits: { timeoutMs: number; maxStdoutBytes: number; maxStderrBytes: number },
+  limits: { timeoutMs: number; maxStdoutBytes: number; maxStderrBytes: number; signal?: AbortSignal },
 ): Promise<AudioProbeResult> {
   return new Promise((resolve) => {
     const child = spawn(executable, [...args], { shell: false, stdio: ["ignore", "pipe", "pipe"] });
@@ -84,6 +61,7 @@ function runWorker(
       if (graceTimer !== undefined) clearTimeout(graceTimer);
       if (boundTimer !== undefined) clearTimeout(boundTimer);
       timeout = graceTimer = boundTimer = undefined;
+      limits.signal?.removeEventListener("abort", abort);
     };
     const finish = (result: AudioProbeResult): void => {
       if (settled) return;
@@ -92,6 +70,7 @@ function runWorker(
       resolve(result);
     };
     const warning = (message: string): void => finish({ ok: false, warning: { path: canonicalPath, message } });
+    const abort = (): void => terminate("audio analysis aborted");
     const terminate = (message: string): void => {
       if (settled || terminating) return;
       terminating = true;
@@ -120,6 +99,7 @@ function runWorker(
       stderr += chunk.toString();
       if (Buffer.byteLength(stderr) > limits.maxStderrBytes) terminate("audio worker stderr exceeded configured limit");
     });
+    limits.signal?.addEventListener("abort", abort, { once: true });
     child.on("error", (error) => warning(`Unable to run audio worker: ${errorMessage(error)}`));
     child.on("close", (code) => {
       if (settled || terminating) return;
@@ -134,7 +114,7 @@ function runWorker(
         const detail = typeof parsed.error === "string" && parsed.error.length > 0 ? parsed.error : "unknown worker error";
         return warning(`audio worker reported failure: ${detail}`);
       }
-      const features = normalizeFeatures(parsed.features);
+      const features = normalizeAudioFeatures(parsed.features);
       if (features === undefined) return warning("audio worker returned invalid feature data");
       finish({ ok: true, features });
     });

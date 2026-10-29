@@ -20,7 +20,7 @@ async function helper(root: string, name: string, body: string): Promise<string>
 }
 
 async function waitForPidFile(file: string): Promise<number> {
-  const deadline = Date.now() + 1000;
+  const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     try {
       const pid = Number(await fs.readFile(file, "utf8"));

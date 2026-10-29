@@ -6,7 +6,8 @@ export type CliOptions =
   | { command: "search"; query: string; libraryRoot: string }
   | { command: "console"; libraryRoot: string }
   | { command: "demo"; libraryRoot: string }
-  | { command: "library"; action: "scan" | "status" | "duplicates"; libraryRoot: string };
+  | { command: "analyze"; libraryRoot: string }
+  | { command: "library"; action: "scan" | "status" | "duplicates" | "analyze"; libraryRoot: string };
 
 export class ArgumentError extends Error {
   constructor(message: string) {
@@ -62,7 +63,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
     return { command, query, libraryRoot };
   }
 
-  if (command === "console" || command === "demo") {
+  if (command === "console" || command === "demo" || command === "analyze") {
     if (index + 1 < argv.length) {
       throw new ArgumentError("Only one command may be provided");
     }
@@ -71,8 +72,8 @@ export function parseArgs(argv: readonly string[]): CliOptions {
 
   if (command === "library") {
     const action = argv[index + 1];
-    if (action !== "scan" && action !== "status" && action !== "duplicates") {
-      throw new ArgumentError("Missing library action. Usage: narada library scan|status|duplicates");
+    if (action !== "scan" && action !== "status" && action !== "duplicates" && action !== "analyze") {
+      throw new ArgumentError("Missing library action. Usage: narada library scan|status|duplicates|analyze");
     }
     if (index + 2 < argv.length) {
       throw new ArgumentError("Only one command may be provided");

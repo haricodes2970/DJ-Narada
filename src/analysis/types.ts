@@ -23,4 +23,5 @@ export type AudioProbeOptions = {
   timeoutMs?: number;
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
+  signal?: AbortSignal;
 };

@@ -91,6 +91,7 @@ export function clampIndex(index: number, length: number): number {
 
 export function syntheticBpm(track: Track | undefined): number {
   if (track === undefined) return 0;
+  if (track.bpm !== undefined && Number.isFinite(track.bpm) && track.bpm > 0) return Math.round(track.bpm);
   let hash = 0;
   for (const character of `${track.title}${track.artist ?? ""}`) {
     hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
@@ -100,6 +101,7 @@ export function syntheticBpm(track: Track | undefined): number {
 
 export function syntheticEnergy(track: Track | undefined, tick: number): number {
   if (track === undefined) return 0;
+  if (track.energy !== undefined && Number.isFinite(track.energy)) return Math.max(0, Math.min(1, track.energy));
   let hash = 0;
   for (const character of track.id) hash = (hash * 33 + character.charCodeAt(0)) >>> 0;
   const base = 0.35 + (hash % 40) / 100;

@@ -1,6 +1,8 @@
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
+import type { Track } from "../library/types.js";
+
 export type TrackScanStatus = "present" | "missing" | "error";
 
 export type StoredTrack = {
@@ -65,6 +67,20 @@ export type ScanRunInput = {
 };
 
 export type ScanRunRecord = ScanRunInput & { id: number };
+
+export function storedTrackToTrack(track: StoredTrack): Track {
+  return {
+    id: track.id,
+    path: track.path,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    durationSeconds: track.durationSeconds,
+    format: track.format,
+    contentHash: track.contentHash,
+    sizeBytes: track.sizeBytes,
+  };
+}
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;

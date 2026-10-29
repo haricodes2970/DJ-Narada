@@ -103,6 +103,15 @@ test("parses library actions", () => {
     action: "duplicates",
     libraryRoot: DEFAULT_LIBRARY_ROOT,
   });
+  assert.deepEqual(parseArgs(["library", "analyze"]), {
+    command: "library",
+    action: "analyze",
+    libraryRoot: DEFAULT_LIBRARY_ROOT,
+  });
+  assert.deepEqual(parseArgs(["analyze"]), {
+    command: "analyze",
+    libraryRoot: DEFAULT_LIBRARY_ROOT,
+  });
 });
 
 test("rejects an unknown library action", () => {

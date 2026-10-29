@@ -206,6 +206,62 @@ test("library duplicates prints duplicate groups", async () => {
   assert.match(deps.stdout.text, /\/music\/b\.mp3/);
 });
 
+test("analyze reports analyzed, cached and failed tracks", async () => {
+  const seen: Track[][] = [];
+  const deps = dependencies({
+    libraryStatus: async () => ({
+      databasePath: "/tmp/narada.db",
+      exists: true,
+      schemaVersion: 2,
+      counts: { total: 2, present: 2, missing: 0, errors: 0, duplicates: 0 },
+      duplicates: [],
+      tracks: [
+        { id: "/music/a.mp3", path: "/music/a.mp3", sizeBytes: 1, title: "A", contentHash: "ha", scanStatus: "present", firstSeenAt: "", lastSeenAt: "", updatedAt: "" },
+        { id: "/music/b.mp3", path: "/music/b.mp3", sizeBytes: 1, title: "B", contentHash: "hb", scanStatus: "present", firstSeenAt: "", lastSeenAt: "", updatedAt: "" },
+      ],
+    }),
+    analyzeTracks: async (tracks) => {
+      seen.push([...tracks]);
+      return {
+        total: 2,
+        analyzed: 1,
+        cached: 1,
+        failed: 0,
+        aborted: false,
+        warnings: [],
+      };
+    },
+  });
+  const code = await run(["analyze"], deps);
+  assert.equal(code, 0);
+  assert.match(deps.stdout.text, /Analyzed: 1 · Cached: 1 · Failed: 0/);
+  assert.deepEqual(seen[0].map((item) => item.contentHash), ["ha", "hb"]);
+});
+
+test("analyze returns a failure code when a track cannot be analyzed", async () => {
+  const deps = dependencies({
+    libraryStatus: async () => ({
+      databasePath: "/tmp/narada.db",
+      exists: true,
+      schemaVersion: 2,
+      counts: { total: 1, present: 1, missing: 0, errors: 0, duplicates: 0 },
+      duplicates: [],
+      tracks: [{ id: "/music/a.mp3", path: "/music/a.mp3", sizeBytes: 1, title: "A", scanStatus: "present", firstSeenAt: "", lastSeenAt: "", updatedAt: "" }],
+    }),
+    analyzeTracks: async () => ({
+      total: 1,
+      analyzed: 0,
+      cached: 0,
+      failed: 1,
+      aborted: false,
+      warnings: [{ path: "/music/a.mp3", message: "bad audio" }],
+    }),
+  });
+  const code = await run(["library", "analyze"], deps);
+  assert.equal(code, 1);
+  assert.match(deps.stderr.text, /bad audio/);
+});
+
 test("console command routes to the console runner", async () => {
   const calls: Array<{ libraryRoot: string; demo: boolean }> = [];
   const deps = dependencies({

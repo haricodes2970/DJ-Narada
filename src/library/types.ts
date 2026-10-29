@@ -23,6 +23,8 @@ export type Track = {
   durationSeconds?: number;
   format?: string;
   contentHash?: string;
+  bpm?: number;
+  energy?: number;
   sizeBytes: number;
 };
 

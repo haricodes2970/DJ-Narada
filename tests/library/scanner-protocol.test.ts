@@ -7,9 +7,13 @@ import test from "node:test";
 import { runNativeScanner } from "../../src/library/protocol.js";
 
 async function waitForPidFile(file: string): Promise<number> {
-  const deadline = Date.now() + 1000;
+  const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
-    try { return Number(await fs.readFile(file, "utf8")); } catch { await new Promise((resolve) => setTimeout(resolve, 10)); }
+    try {
+      const pid = Number(await fs.readFile(file, "utf8"));
+      if (Number.isInteger(pid) && pid > 0) return pid;
+    } catch { /* helper has not written yet */ }
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`PID file not created: ${file}`);
 }

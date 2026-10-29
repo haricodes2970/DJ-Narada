@@ -9,11 +9,11 @@ import {
   openDatabase,
 } from "../../src/db/database.js";
 
-test("openDatabase applies the initial schema and records its version", async () => {
+test("openDatabase applies the current schema and records its version", async () => {
   const db = await openDatabase(":memory:");
   try {
-    assert.equal(currentSchemaVersion(db), 1);
-    assert.deepEqual(appliedMigrations(db).map((migration) => migration.version), [1]);
+    assert.equal(currentSchemaVersion(db), 2);
+    assert.deepEqual(appliedMigrations(db).map((migration) => migration.version), [1, 2]);
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all()
@@ -30,7 +30,7 @@ test("migrate is idempotent", async () => {
   const db = await openDatabase(":memory:");
   try {
     assert.deepEqual(migrate(db), []);
-    assert.equal(currentSchemaVersion(db), 1);
+    assert.equal(currentSchemaVersion(db), 2);
   } finally {
     closeDatabase(db);
   }
@@ -40,10 +40,10 @@ test("a failing migration rolls back without advancing the version", async () =>
   const db = await openDatabase(":memory:");
   try {
     assert.throws(() =>
-      migrate(db, [{ version: 2, name: "broken", up: "CREATE TABLE broken (" }]),
+      migrate(db, [{ version: 3, name: "broken", up: "CREATE TABLE broken (" }]),
     );
-    assert.equal(currentSchemaVersion(db), 1);
-    assert.deepEqual(appliedMigrations(db).map((migration) => migration.version), [1]);
+    assert.equal(currentSchemaVersion(db), 2);
+    assert.deepEqual(appliedMigrations(db).map((migration) => migration.version), [1, 2]);
     const broken = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'broken'")
       .get();
