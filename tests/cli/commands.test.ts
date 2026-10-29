@@ -114,6 +114,13 @@ test("parses library actions", () => {
   });
 });
 
+test("parses library-only invocation as real console mode", () => {
+  assert.deepEqual(parseArgs(["--library", "/home/hari007/Music/SeedheMauth"]), {
+    command: "console",
+    libraryRoot: "/home/hari007/Music/SeedheMauth",
+  });
+});
+
 test("rejects an unknown library action", () => {
   assert.throws(
     () => parseArgs(["library", "nope"]),

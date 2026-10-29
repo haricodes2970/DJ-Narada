@@ -40,6 +40,9 @@ export function parseArgs(argv: readonly string[]): CliOptions {
 
   const command = argv[index];
   if (command === undefined) {
+    if (configuredLibraryRoot !== undefined) {
+      return { command: "console", libraryRoot: resolveLibraryRoot(configuredLibraryRoot) };
+    }
     throw new ArgumentError("Missing command. Use --help for usage");
   }
 

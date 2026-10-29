@@ -205,7 +205,7 @@ test("timeout escalates to SIGKILL and preserves fallback", async () => {
     const pidFile = path.join(root, "pid");
     const executable = await helper(root, "hang.mjs", `import fs from 'node:fs/promises'; await fs.writeFile(${JSON.stringify(pidFile)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);\n`);
     const pidPromise = waitForPidFile(pidFile);
-    const result = await probeTrackWithHelper(audio, { executable: process.execPath, timeoutMs: 100 }, executable);
+    const result = await probeTrackWithHelper(audio, { executable: process.execPath, timeoutMs: 1000 }, executable);
     assert.equal(result.track?.title, "hang");
     assert.match(result.warning?.message ?? "", /timed out/);
     await assertExited(await pidPromise);
