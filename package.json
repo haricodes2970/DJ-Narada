@@ -1,0 +1,16 @@
+{
+  "name": "narada-dj",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Terminal-native AI DJ research project foundation.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
