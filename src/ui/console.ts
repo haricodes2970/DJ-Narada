@@ -1,4 +1,8 @@
+import fs from "node:fs/promises";
+
 import { TerminalSession, type CliAction } from "../cli/terminal.js";
+import { closeDatabase, openDatabase } from "../db/database.js";
+import { resolveDatabasePath } from "../config/paths.js";
 import { PlaybackController } from "../player/controller.js";
 import type { PlaybackState } from "../player/types.js";
 import { VlcBackend } from "../player/vlcBackend.js";
@@ -10,6 +14,8 @@ import {
 } from "../mixing/crossfade.js";
 import { buildCatalog, type CatalogResult } from "../library/catalog.js";
 import { applyMode, getModes } from "../library/modes.js";
+import { buildCategories, sortCategories, type LibraryCategory } from "../library/categories.js";
+import { CategoryStarRepository } from "../library/categoryStars.js";
 import { probeTrack } from "../library/metadata.js";
 import { scanLibrary } from "../library/scanner.js";
 import { searchTracks } from "../library/search.js";
@@ -46,6 +52,8 @@ export type NaradaConsoleOptions = {
   frameMs?: number;
   autoStartTimer?: boolean;
   playback?: PlaybackController;
+  categories?: LibraryCategory[];
+  categoryStars?: CategoryStarRepository;
   crossfadeSettings?: CrossfadeSettings;
   crossfadeCacheDir?: string;
   crossfadeRenderer?: (plan: ReturnType<typeof planCrossfade>) => Promise<CrossfadeRenderResult>;
@@ -83,6 +91,7 @@ export class NaradaConsole {
   private readonly splashMs: number;
   private readonly autoStartTimer: boolean;
   private readonly playback: PlaybackController | undefined;
+  private readonly categoryStars: CategoryStarRepository | undefined;
   private readonly crossfadeSettings: CrossfadeSettings;
   private readonly crossfadeCacheDir: string | undefined;
   private readonly crossfadeRenderer: ((plan: ReturnType<typeof planCrossfade>) => Promise<CrossfadeRenderResult>) | undefined;
@@ -106,6 +115,7 @@ export class NaradaConsole {
     this.splashMs = options.splashMs ?? 0;
     this.autoStartTimer = options.autoStartTimer ?? true;
     this.playback = options.playback;
+    this.categoryStars = options.categoryStars;
     this.crossfadeSettings = options.crossfadeSettings ?? {};
     this.crossfadeCacheDir = options.crossfadeCacheDir;
     this.crossfadeRenderer = options.crossfadeRenderer;
@@ -115,6 +125,11 @@ export class NaradaConsole {
       warnings: this.catalog.warnings,
       demo: this.demo,
     });
+    const categories = options.categories ?? buildCategories(this.libraryRoot, this.catalog.tracks);
+    const starred = new Set(this.categoryStars?.list() ?? []);
+    this.state.categories = sortCategories(categories.map((category) => ({ ...category, starred: starred.has(category.path) })));
+    this.state.categoryIndex = 0;
+    this.state.categoryId = this.state.categories[0]?.id ?? "__all__";
     this.refreshModeCounts();
     this.selectFirstTrack();
     if (this.playback !== undefined) {
@@ -435,7 +450,15 @@ export class NaradaConsole {
         this.state.overlay = "info";
         break;
       case "diagnostics":
-        this.state.message = `${this.state.tracks.length} tracks · ${this.state.filtered.length} filtered · ${this.state.warnings.length} warnings · ${this.libraryRoot}`;
+        this.state.message = `${this.state.tracks.length} tracks · ${this.state.categories.length - 1} categories · ${this.state.warnings.length} warnings · ${this.libraryRoot}`;
+        break;
+      case "category":
+        this.state.panel = "library";
+        this.state.categoryIndex = clampIndex(this.state.categoryIndex + 1, this.state.categories.length);
+        this.selectCategory(this.state.categories[this.state.categoryIndex]);
+        break;
+      case "favorite":
+        this.toggleFavoriteCategory();
         break;
       case "back":
         this.state.overlay = "none";
@@ -447,8 +470,47 @@ export class NaradaConsole {
     this.render();
   }
 
+  private toggleFavoriteCategory(): void {
+    const category = this.state.categories[this.state.categoryIndex];
+    if (category === undefined || category.id === "__all__" || this.categoryStars === undefined) {
+      this.state.message = "Select a folder category before starring";
+      return;
+    }
+    const starred = this.categoryStars.toggle(category.path);
+    this.state.categories = sortCategories(this.state.categories.map((item) => item.path === category.path ? { ...item, starred } : item));
+    this.state.categoryIndex = this.state.categories.findIndex((item) => item.id === category.id);
+    this.state.message = `${starred ? "Starred" : "Unstarred"}: ${category.name}`;
+  }
+
+  private selectCategory(category: LibraryCategory | undefined): void {
+    if (category === undefined) return;
+    this.state.categoryIndex = Math.max(0, this.state.categories.findIndex((item) => item.id === category.id));
+    this.state.categoryId = category.id;
+    this.state.queue = [...category.tracks];
+    this.state.filtered = [...category.tracks];
+    this.state.queueIndex = 0;
+    this.state.libraryIndex = 0;
+    this.state.queueSelection = 0;
+    const track = category.tracks[0];
+    this.state.duration = track?.durationSeconds ?? 0;
+    this.state.position = 0;
+    this.state.bpm = syntheticBpm(track);
+    if (this.playback !== undefined) {
+      this.playback.setQueue(this.state.queue, 0);
+      if (track !== undefined) void this.playback.playIndex(0);
+      else void this.playback.stop();
+      this.syncPlaybackState();
+    } else if (track !== undefined) {
+      this.startTrack(track);
+    }
+    this.state.message = `${category.name}: ${category.trackCount} track${category.trackCount === 1 ? "" : "s"}`;
+  }
+
   private moveSelection(delta: number): void {
-    if (this.state.panel === "library") {
+    if (this.state.panel === "library" && this.state.categories.length > 0) {
+      this.state.categoryIndex = clampIndex(this.state.categoryIndex + delta, this.state.categories.length);
+      this.selectCategory(this.state.categories[this.state.categoryIndex]);
+    } else if (this.state.panel === "library") {
       this.state.libraryIndex = clampIndex(this.state.libraryIndex + delta, this.state.filtered.length);
     } else {
       this.state.queueSelection = clampIndex(this.state.queueSelection + delta, this.state.queue.length);
@@ -683,6 +745,17 @@ export async function runConsole(options: RunConsoleOptions): Promise<number> {
     const scan = await scanLibrary({ root });
     return buildCatalog(scan, (filePath) => probeTrack(filePath));
   }))(options.libraryRoot);
+  let categoryStars: CategoryStarRepository | undefined;
+  let categoryFolders: string[] = [];
+  let categoryDatabase: Awaited<ReturnType<typeof openDatabase>> | undefined;
+  try {
+    const entries = await fs.readdir(options.libraryRoot, { withFileTypes: true });
+    categoryFolders = entries.filter((entry) => entry.isDirectory() && entry.name !== "DJ").map((entry) => entry.name);
+    categoryDatabase = await openDatabase(resolveDatabasePath());
+    categoryStars = new CategoryStarRepository(categoryDatabase);
+  } catch {
+    // Console remains usable with in-memory categories if database access fails.
+  }
 
   const shouldEnablePlayback = options.enablePlayback ?? !(options.demo ?? false);
   const environment = options.env ?? process.env;
@@ -701,6 +774,8 @@ export async function runConsole(options: RunConsoleOptions): Promise<number> {
     splashMs: options.splashMs ?? 900,
     autoStartTimer: options.autoStartTimer ?? true,
     playback,
+    categories: buildCategories(options.libraryRoot, catalog.tracks, categoryFolders),
+    categoryStars,
     crossfadeSettings: options.crossfadeSettings,
     crossfadeCacheDir: options.crossfadeCacheDir,
     crossfadeRenderer: options.crossfadeRenderer,
@@ -708,5 +783,6 @@ export async function runConsole(options: RunConsoleOptions): Promise<number> {
 
   await console.run();
   await playback?.close();
+  if (categoryDatabase !== undefined) closeDatabase(categoryDatabase);
   return 0;
 }

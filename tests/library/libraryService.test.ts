@@ -76,7 +76,7 @@ test("incremental scan reuses unchanged files, updates changed files, and marks 
 
     const status = await libraryStatus({ databasePath: dbPath, includeTracks: true });
     assert.equal(status.exists, true);
-    assert.equal(status.schemaVersion, 2);
+    assert.equal(status.schemaVersion, 3);
     assert.equal(status.counts.present, 1);
     assert.equal(status.counts.missing, 1);
     assert.equal(status.tracks.length, 2);

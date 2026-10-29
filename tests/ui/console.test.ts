@@ -143,15 +143,15 @@ test("console collapses the queue and library at narrow widths", () => {
   assert.match(one, /ON AIR/);
 });
 
-test("console navigates the library and plays the selected track", () => {
+test("console navigates categories and plays selected category", () => {
   const { console } = setup();
   console.start();
   console.dispatch("down", "j");
-  assert.equal(console.getState().libraryIndex, 1);
+  assert.equal(console.getState().categoryIndex, 1);
   console.dispatch("select", "\r");
-  assert.equal(console.getState().queueIndex, 1);
+  assert.equal(console.getState().categoryId, "desi");
+  assert.equal(console.getState().queue[0]?.title, "Tum Hi Ho");
   assert.match(console.getState().message, /Tum Hi Ho/);
-  assert.match(console.renderToString(), /Tum Hi Ho/);
 });
 
 test("console drives a real playback controller when attached", async () => {

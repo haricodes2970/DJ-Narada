@@ -153,6 +153,7 @@ export const MIGRATIONS: readonly Migration[] = [
       );
 
       CREATE INDEX idx_scan_runs_root_started ON scan_runs(root, started_at);
+
     `,
   },
   {
@@ -162,6 +163,16 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE analysis_runs ADD COLUMN source_hash TEXT;
       CREATE INDEX idx_analysis_runs_lookup
         ON analysis_runs(track_id, algorithm, algorithm_version, source_hash);
+    `,
+  },
+  {
+    version: 3,
+    name: "category_stars",
+    up: `
+      CREATE TABLE category_stars (
+        category_path TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL
+      );
     `,
   },
 ];

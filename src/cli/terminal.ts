@@ -23,6 +23,8 @@ export type CliAction =
   | "crossfade"
   | "info"
   | "diagnostics"
+  | "category"
+  | "favorite"
   | "unknown";
 
 export interface TerminalInput {
@@ -93,6 +95,8 @@ const KEY_ACTIONS: Readonly<Record<string, CliAction>> = {
   x: "crossfade",
   i: "info",
   d: "diagnostics",
+  f: "favorite",
+  c: "category",
   "\u001b[A": "up",
   "\u001b[B": "down",
   "\u001b[C": "nextPanel",

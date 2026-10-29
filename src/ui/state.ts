@@ -1,4 +1,5 @@
 import type { ScanWarning, Track } from "../library/types.js";
+import type { LibraryCategory } from "../library/categories.js";
 
 export type PlaybackStatus = "playing" | "paused" | "stopped" | "loading" | "error";
 export type Overlay = "none" | "help" | "modes" | "search" | "info";
@@ -31,6 +32,9 @@ export type ConsoleState = {
   demo: boolean;
   bpm: number;
   modeCounts: Record<string, number>;
+  categories: LibraryCategory[];
+  categoryIndex: number;
+  categoryId: string;
 };
 
 export type CreateStateInput = {
@@ -69,6 +73,9 @@ export function createConsoleState(input: CreateStateInput): ConsoleState {
     demo: input.demo ?? false,
     bpm: 0,
     modeCounts: {},
+    categories: [],
+    categoryIndex: 0,
+    categoryId: "__all__",
   };
 }
 

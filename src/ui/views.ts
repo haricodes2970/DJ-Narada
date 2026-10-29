@@ -129,8 +129,25 @@ export function renderLibrary(screen: ScreenBuffer, layout: Layout, state: Conso
   if (inner.width < 4 || inner.height < 2) return;
 
   let y = inner.y;
-  screen.text(inner.x, y, "MODES", { fg: theme.muted, bold: true });
+  screen.text(inner.x, y, "CATEGORIES", { fg: theme.muted, bold: true });
   y += 1;
+  const categoryLimit = Math.min(state.categories.length, Math.max(0, Math.floor(inner.height * 0.28)));
+  for (let index = 0; index < categoryLimit && y < inner.y + inner.height - 4; index += 1) {
+    const category = state.categories[index];
+    const active = state.categoryIndex === index;
+    const star = category.starred ? "★" : " ";
+    const line = `${star} ${truncate(category.name, Math.max(4, inner.width - 10))} ${category.trackCount}`;
+    if (active) {
+      screen.fill(inner.x, y, inner.width, 1, " ", { bg: theme.panelAlt });
+      screen.text(inner.x, y, pad(line, inner.width), { fg: theme.amber, bg: theme.panelAlt, bold: true });
+    } else screen.text(inner.x, y, pad(line, inner.width), { fg: theme.text });
+    y += 1;
+  }
+  y += 1;
+  if (y < inner.y + inner.height - 4) {
+    screen.text(inner.x, y, "MODES", { fg: theme.muted, bold: true });
+    y += 1;
+  }
   const modes = getModes();
   for (let index = 0; index < modes.length && y < inner.y + inner.height - 4; index += 1) {
     const mode = modes[index];
