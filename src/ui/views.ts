@@ -144,26 +144,6 @@ export function renderLibrary(screen: ScreenBuffer, layout: Layout, state: Conso
     y += 1;
   }
   y += 1;
-  if (y < inner.y + inner.height - 4) {
-    screen.text(inner.x, y, "MODES", { fg: theme.muted, bold: true });
-    y += 1;
-  }
-  const modes = getModes();
-  for (let index = 0; index < modes.length && y < inner.y + inner.height - 4; index += 1) {
-    const mode = modes[index];
-    const active = state.modeId === mode.id;
-    const count = state.modeCounts[mode.id] ?? 0;
-    const label = `${active ? "▸" : " "} ${truncate(mode.name, inner.width - 7)}`;
-    const countText = String(count).padStart(3);
-    const line = `${pad(label, inner.width - 4)}${countText}`;
-    if (active) {
-      screen.fill(inner.x, y, inner.width, 1, " ", { bg: theme.panelAlt });
-      screen.text(inner.x, y, line, { fg: theme.ember, bg: theme.panelAlt, bold: true });
-    } else {
-      screen.text(inner.x, y, line, { fg: theme.text });
-    }
-    y += 1;
-  }
 
   y += 1;
   if (y < inner.y + inner.height - 3) {
@@ -253,6 +233,7 @@ export function renderNowPlaying(screen: ScreenBuffer, layout: Layout, state: Co
       screen.text(textX, infoY + 1, truncate(trackDetails(track), textWidth), { fg: theme.muted });
       const meta = `${state.bpm > 0 ? `${state.bpm} BPM` : ""}${state.bpm > 0 ? " · " : ""}${formatTime(state.duration)}`;
       screen.text(textX, infoY + 2, truncate(meta, textWidth), { fg: theme.amber });
+      if (infoY + 3 < inner.y + inner.height - 2) screen.text(textX, infoY + 3, truncate(track.path, textWidth), { fg: theme.muted });
     }
   }
 

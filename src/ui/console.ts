@@ -125,11 +125,18 @@ export class NaradaConsole {
       warnings: this.catalog.warnings,
       demo: this.demo,
     });
-    const categories = options.categories ?? buildCategories(this.libraryRoot, this.catalog.tracks);
-    const starred = new Set(this.categoryStars?.list() ?? []);
-    this.state.categories = sortCategories(categories.map((category) => ({ ...category, starred: starred.has(category.path) })));
-    this.state.categoryIndex = 0;
-    this.state.categoryId = this.state.categories[0]?.id ?? "__all__";
+    const categories = options.categories;
+    if (categories !== undefined) {
+      const starred = new Set(this.categoryStars?.list() ?? []);
+      this.state.categories = sortCategories(categories.map((category) => ({ ...category, starred: starred.has(category.path) })));
+      const initialCategory = this.state.categories.find((category) => category.id !== "__all__") ?? this.state.categories[0];
+      this.state.categoryIndex = initialCategory === undefined ? 0 : this.state.categories.findIndex((category) => category.id === initialCategory.id);
+      this.state.categoryId = initialCategory?.id ?? "__all__";
+      if (initialCategory !== undefined) {
+        this.state.queue = [...initialCategory.tracks];
+        this.state.filtered = [...initialCategory.tracks];
+      }
+    }
     this.refreshModeCounts();
     this.selectFirstTrack();
     if (this.playback !== undefined) {

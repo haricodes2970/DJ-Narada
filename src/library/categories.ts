@@ -39,8 +39,8 @@ export function buildCategories(root: string, tracks: readonly Track[], folders:
 
 export function sortCategories(categories: readonly LibraryCategory[]): LibraryCategory[] {
   return [...categories].sort((a, b) => {
-    if (a.id === ALL_TRACKS_CATEGORY) return -1;
-    if (b.id === ALL_TRACKS_CATEGORY) return 1;
+    if (a.id === ALL_TRACKS_CATEGORY) return 1;
+    if (b.id === ALL_TRACKS_CATEGORY) return -1;
     if (a.starred !== b.starred) return a.starred ? -1 : 1;
     return b.trackCount - a.trackCount || a.name.localeCompare(b.name);
   });

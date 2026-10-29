@@ -13,7 +13,7 @@ test("builds first-level folder categories and all-tracks category", () => {
     track("c", "/music/Kannada/c.mp3"),
   ], ["EmptyFolder"]);
   assert.deepEqual(categories.map((category) => [category.id, category.trackCount]), [
-    ["__all__", 3], ["SeedheMauth", 2], ["Kannada", 1], ["EmptyFolder", 0],
+    ["SeedheMauth", 2], ["Kannada", 1], ["EmptyFolder", 0], ["__all__", 3],
   ]);
 });
 

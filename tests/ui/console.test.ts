@@ -6,6 +6,8 @@ import type { Track } from "../../src/library/types.js";
 import { PlaybackController } from "../../src/player/controller.js";
 import { DummyBackend } from "../../src/player/dummyBackend.js";
 import type { CrossfadeRenderResult } from "../../src/mixing/crossfade.js";
+import { buildCategories } from "../../src/library/categories.js";
+import type { LibraryCategory } from "../../src/library/categories.js";
 import { NaradaConsole } from "../../src/ui/console.js";
 import { EMBER_THEME } from "../../src/ui/theme.js";
 
@@ -93,6 +95,7 @@ function setup(options: {
   frameMs?: number;
   playback?: PlaybackController;
   crossfadeRenderer?: (plan: unknown) => Promise<CrossfadeRenderResult>;
+  categories?: LibraryCategory[];
 } = {}) {
   const input = new FakeInput();
   const output = new FakeOutput();
@@ -111,6 +114,7 @@ function setup(options: {
     autoStartTimer: false,
     playback: options.playback,
     crossfadeRenderer: options.crossfadeRenderer as never,
+    categories: options.categories,
   });
   return { input, output, terminal, console };
 }
@@ -144,14 +148,14 @@ test("console collapses the queue and library at narrow widths", () => {
 });
 
 test("console navigates categories and plays selected category", () => {
-  const { console } = setup();
+  const { console } = setup({ categories: buildCategories("/music", tracks, ["hiphop", "desi", "focus", "other"]) });
   console.start();
   console.dispatch("down", "j");
   assert.equal(console.getState().categoryIndex, 1);
   console.dispatch("select", "\r");
-  assert.equal(console.getState().categoryId, "desi");
-  assert.equal(console.getState().queue[0]?.title, "Tum Hi Ho");
-  assert.match(console.getState().message, /Tum Hi Ho/);
+  assert.equal(console.getState().categoryId, "focus");
+  assert.equal(console.getState().queue[0]?.title, "Deep Work");
+  assert.match(console.getState().message, /Deep Work/);
 });
 
 test("console drives a real playback controller when attached", async () => {
