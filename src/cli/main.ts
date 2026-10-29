@@ -1,4 +1,5 @@
 import { ArgumentError, parseArgs } from "./commands.js";
+import { DEFAULT_LIBRARY_ROOT } from "../config/paths.js";
 import { buildCatalog } from "../library/catalog.js";
 import { probeTrack } from "../library/metadata.js";
 import { scanLibrary } from "../library/scanner.js";
@@ -17,6 +18,7 @@ export type MainDependencies = {
   stderr: OutputStream;
   isTTY: boolean;
   interactive?: () => Promise<void>;
+  consoleRunner?: (options: { libraryRoot: string; demo: boolean }) => Promise<number>;
 };
 
 export const HELP_TEXT = `Narada DJ — terminal-native local DJ
@@ -27,11 +29,15 @@ Usage:
   narada search "query"
   narada --library /path scan
   narada --library /path search "query"
-  narada                       interactive console (TTY only)
+  narada console               interactive console (TTY only)
+  narada demo                  console with a synthetic demo clock (TTY only)
+  narada                       same as narada console
 
 Commands:
   scan      Scan the library and list discovered tracks
   search    Search title, artist, album, filename, and path
+  console   Open the Narada terminal console
+  demo      Open the console with synthetic playback and animation
 
 Options:
   --library <path>   Music library root (default: /home/hari007/Music)
@@ -41,6 +47,11 @@ Safety:
   Read-only. Narada never moves, renames, deletes, or rewrites audio files.
 `;
 
+async function defaultConsoleRunner(options: { libraryRoot: string; demo: boolean }): Promise<number> {
+  const { runConsole } = await import("../ui/console.js");
+  return runConsole({ libraryRoot: options.libraryRoot, demo: options.demo });
+}
+
 function defaultDependencies(): MainDependencies {
   return {
     scanLibrary,
@@ -48,6 +59,7 @@ function defaultDependencies(): MainDependencies {
     stdout: process.stdout,
     stderr: process.stderr,
     isTTY: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    consoleRunner: defaultConsoleRunner,
   };
 }
 
@@ -122,6 +134,9 @@ export async function run(
   dependencies: MainDependencies = defaultDependencies(),
 ): Promise<number> {
   if (argv.length === 0) {
+    if (dependencies.isTTY && dependencies.consoleRunner !== undefined) {
+      return dependencies.consoleRunner({ libraryRoot: DEFAULT_LIBRARY_ROOT, demo: false });
+    }
     if (dependencies.isTTY && dependencies.interactive !== undefined) {
       await dependencies.interactive();
       return 0;
@@ -150,5 +165,16 @@ export async function run(
       return runScan(options.libraryRoot, dependencies);
     case "search":
       return runSearch(options.libraryRoot, options.query, dependencies);
+    case "console":
+    case "demo": {
+      if (dependencies.consoleRunner === undefined) {
+        dependencies.stderr.write("Interactive console is unavailable in this build.\n");
+        return 2;
+      }
+      return dependencies.consoleRunner({
+        libraryRoot: options.libraryRoot,
+        demo: options.command === "demo",
+      });
+    }
   }
 }

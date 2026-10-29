@@ -203,7 +203,7 @@ export class TerminalSession {
   private readonly registry: ChildProcessRegistry;
   private readonly installSignalHandlers: boolean;
   private readonly parser = new KeyParser();
-  private inputHandler: ((action: CliAction) => void) | undefined;
+  private inputHandler: ((action: CliAction, key: string) => void) | undefined;
   private readonly resizeHandlers = new Set<() => void>();
   private readonly dataListener = (chunk: string | Buffer): void => this.handleData(chunk);
   private readonly resizeListener = (): void => {
@@ -251,7 +251,7 @@ export class TerminalSession {
     this.output.write(text);
   }
 
-  onInput(handler: (action: CliAction) => void): void {
+  onInput(handler: (action: CliAction, key: string) => void): void {
     this.inputHandler = handler;
   }
 
@@ -292,12 +292,12 @@ export class TerminalSession {
 
   private handleData(chunk: string | Buffer): void {
     const keys = this.parser.push(chunk);
-    for (const key of keys) this.inputHandler?.(mapKey(key));
+    for (const key of keys) this.inputHandler?.(mapKey(key), key);
     if (this.parser.hasPendingEscape()) {
       if (this.escapeTimer !== undefined) clearTimeout(this.escapeTimer);
       this.escapeTimer = setTimeout(() => {
         this.escapeTimer = undefined;
-        for (const key of this.parser.flush()) this.inputHandler?.(mapKey(key));
+        for (const key of this.parser.flush()) this.inputHandler?.(mapKey(key), key);
       }, ESCAPE_FLUSH_MS);
       this.escapeTimer.unref?.();
     }

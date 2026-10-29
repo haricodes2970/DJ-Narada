@@ -3,7 +3,9 @@ import { resolveLibraryRoot, DEFAULT_LIBRARY_ROOT } from "../config/paths.js";
 export type CliOptions =
   | { command: "help" }
   | { command: "scan"; libraryRoot: string }
-  | { command: "search"; query: string; libraryRoot: string };
+  | { command: "search"; query: string; libraryRoot: string }
+  | { command: "console"; libraryRoot: string }
+  | { command: "demo"; libraryRoot: string };
 
 export class ArgumentError extends Error {
   constructor(message: string) {
@@ -57,6 +59,13 @@ export function parseArgs(argv: readonly string[]): CliOptions {
       throw new ArgumentError("Only one command may be provided");
     }
     return { command, query, libraryRoot };
+  }
+
+  if (command === "console" || command === "demo") {
+    if (index + 1 < argv.length) {
+      throw new ArgumentError("Only one command may be provided");
+    }
+    return { command, libraryRoot };
   }
 
   if (command.startsWith("-")) {

@@ -76,6 +76,17 @@ test("rejects unknown commands", () => {
   );
 });
 
+test("parses console and demo commands", () => {
+  assert.deepEqual(parseArgs(["console"]), {
+    command: "console",
+    libraryRoot: DEFAULT_LIBRARY_ROOT,
+  });
+  assert.deepEqual(parseArgs(["--library", "/tmp/music", "demo"]), {
+    command: "demo",
+    libraryRoot: "/tmp/music",
+  });
+});
+
 test("rejects duplicate commands", () => {
   assert.throws(
     () => parseArgs(["scan", "search", "query"]),

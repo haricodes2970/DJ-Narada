@@ -144,6 +144,46 @@ test("probe failures do not fail the scan command", async () => {
   assert.match(deps.stdout.text, /Tracks: 0/);
 });
 
+test("console command routes to the console runner", async () => {
+  const calls: Array<{ libraryRoot: string; demo: boolean }> = [];
+  const deps = dependencies({
+    consoleRunner: async (options) => {
+      calls.push(options);
+      return 0;
+    },
+  });
+  const code = await run(["--library", "/tmp/music", "console"], deps);
+  assert.equal(code, 0);
+  assert.deepEqual(calls, [{ libraryRoot: "/tmp/music", demo: false }]);
+});
+
+test("demo command enables the synthetic clock", async () => {
+  const calls: Array<{ libraryRoot: string; demo: boolean }> = [];
+  const deps = dependencies({
+    consoleRunner: async (options) => {
+      calls.push(options);
+      return 0;
+    },
+  });
+  const code = await run(["demo"], deps);
+  assert.equal(code, 0);
+  assert.equal(calls[0]?.demo, true);
+});
+
+test("console without a runner is a clear error", async () => {
+  const deps = dependencies({ consoleRunner: undefined });
+  const code = await run(["console"], deps);
+  assert.equal(code, 2);
+  assert.match(deps.stderr.text, /unavailable/);
+});
+
+test("no arguments in a non-TTY prints help and exits two", async () => {
+  const deps = dependencies();
+  const code = await run([], deps);
+  assert.equal(code, 2);
+  assert.match(deps.stdout.text, /Usage:/);
+});
+
 test("compiled entry point has a node shebang and bin mapping", async () => {
   const entry = await fs.readFile(path.resolve("dist/src/index.js"), "utf8");
   assert.equal(entry.split("\n")[0], "#!/usr/bin/env node");
