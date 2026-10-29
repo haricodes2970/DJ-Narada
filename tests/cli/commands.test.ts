@@ -87,6 +87,31 @@ test("parses console and demo commands", () => {
   });
 });
 
+test("parses library actions", () => {
+  assert.deepEqual(parseArgs(["library", "scan"]), {
+    command: "library",
+    action: "scan",
+    libraryRoot: DEFAULT_LIBRARY_ROOT,
+  });
+  assert.deepEqual(parseArgs(["--library", "/tmp/music", "library", "status"]), {
+    command: "library",
+    action: "status",
+    libraryRoot: "/tmp/music",
+  });
+  assert.deepEqual(parseArgs(["library", "duplicates"]), {
+    command: "library",
+    action: "duplicates",
+    libraryRoot: DEFAULT_LIBRARY_ROOT,
+  });
+});
+
+test("rejects an unknown library action", () => {
+  assert.throws(
+    () => parseArgs(["library", "nope"]),
+    (error: unknown) => error instanceof ArgumentError && /library action/.test(error.message),
+  );
+});
+
 test("rejects duplicate commands", () => {
   assert.throws(
     () => parseArgs(["scan", "search", "query"]),

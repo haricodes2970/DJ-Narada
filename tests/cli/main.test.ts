@@ -144,6 +144,68 @@ test("probe failures do not fail the scan command", async () => {
   assert.match(deps.stdout.text, /Tracks: 0/);
 });
 
+test("library scan prints a database summary", async () => {
+  const deps = dependencies({
+    libraryScan: async () => ({
+      root: "/music",
+      databasePath: "/tmp/narada.db",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      finishedAt: "2026-01-01T00:00:01.000Z",
+      filesSeen: 2,
+      present: 2,
+      missing: 0,
+      markedMissing: 0,
+      errors: 0,
+      added: 2,
+      updated: 0,
+      unchanged: 0,
+      duplicates: [],
+      warnings: [],
+      scanRunId: 1,
+    }),
+  });
+  const code = await run(["library", "scan"], deps);
+  assert.equal(code, 0);
+  assert.match(deps.stdout.text, /Database: \/tmp\/narada\.db/);
+  assert.match(deps.stdout.text, /Tracks: 2/);
+  assert.match(deps.stdout.text, /Added: 2/);
+});
+
+test("library status reports a missing database", async () => {
+  const deps = dependencies({
+    libraryStatus: async () => ({
+      databasePath: "/tmp/missing.db",
+      exists: false,
+      schemaVersion: 0,
+      counts: { total: 0, present: 0, missing: 0, errors: 0, duplicates: 0 },
+      duplicates: [],
+      tracks: [],
+    }),
+  });
+  const code = await run(["library", "status"], deps);
+  assert.equal(code, 0);
+  assert.match(deps.stdout.text, /No library database/);
+});
+
+test("library duplicates prints duplicate groups", async () => {
+  const deps = dependencies({
+    libraryDuplicates: async () => [
+      {
+        contentHash: "abcdef1234567890",
+        tracks: [
+          { id: "/music/a.mp3", path: "/music/a.mp3", sizeBytes: 1, title: "A", scanStatus: "present", firstSeenAt: "", lastSeenAt: "", updatedAt: "" },
+          { id: "/music/b.mp3", path: "/music/b.mp3", sizeBytes: 1, title: "B", scanStatus: "present", firstSeenAt: "", lastSeenAt: "", updatedAt: "" },
+        ],
+      },
+    ],
+  });
+  const code = await run(["library", "duplicates"], deps);
+  assert.equal(code, 0);
+  assert.match(deps.stdout.text, /Duplicate content groups: 1/);
+  assert.match(deps.stdout.text, /\/music\/a\.mp3/);
+  assert.match(deps.stdout.text, /\/music\/b\.mp3/);
+});
+
 test("console command routes to the console runner", async () => {
   const calls: Array<{ libraryRoot: string; demo: boolean }> = [];
   const deps = dependencies({

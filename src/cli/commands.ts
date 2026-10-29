@@ -5,7 +5,8 @@ export type CliOptions =
   | { command: "scan"; libraryRoot: string }
   | { command: "search"; query: string; libraryRoot: string }
   | { command: "console"; libraryRoot: string }
-  | { command: "demo"; libraryRoot: string };
+  | { command: "demo"; libraryRoot: string }
+  | { command: "library"; action: "scan" | "status" | "duplicates"; libraryRoot: string };
 
 export class ArgumentError extends Error {
   constructor(message: string) {
@@ -66,6 +67,17 @@ export function parseArgs(argv: readonly string[]): CliOptions {
       throw new ArgumentError("Only one command may be provided");
     }
     return { command, libraryRoot };
+  }
+
+  if (command === "library") {
+    const action = argv[index + 1];
+    if (action !== "scan" && action !== "status" && action !== "duplicates") {
+      throw new ArgumentError("Missing library action. Usage: narada library scan|status|duplicates");
+    }
+    if (index + 2 < argv.length) {
+      throw new ArgumentError("Only one command may be provided");
+    }
+    return { command: "library", action, libraryRoot };
   }
 
   if (command.startsWith("-")) {

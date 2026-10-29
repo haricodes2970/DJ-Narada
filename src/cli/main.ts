@@ -1,9 +1,17 @@
 import { ArgumentError, parseArgs } from "./commands.js";
-import { DEFAULT_LIBRARY_ROOT } from "../config/paths.js";
+import { DEFAULT_LIBRARY_ROOT, resolveDatabasePath } from "../config/paths.js";
+import type { DuplicateGroup } from "../db/tracks.js";
 import { buildCatalog } from "../library/catalog.js";
 import { probeTrack } from "../library/metadata.js";
 import { scanLibrary } from "../library/scanner.js";
 import { searchTracks } from "../library/search.js";
+import {
+  libraryDuplicates,
+  libraryStatus,
+  scanLibraryToDatabase,
+  type LibraryScanSummary,
+  type LibraryStatusSummary,
+} from "../library/libraryService.js";
 import type { ProbeOptions, ProbeResult, ScanOptions, ScanResult, Track } from "../library/types.js";
 
 export type OutputStream = {
@@ -19,6 +27,10 @@ export type MainDependencies = {
   isTTY: boolean;
   interactive?: () => Promise<void>;
   consoleRunner?: (options: { libraryRoot: string; demo: boolean }) => Promise<number>;
+  databasePath?: string;
+  libraryScan?: (options: { root: string; databasePath?: string }) => Promise<LibraryScanSummary>;
+  libraryStatus?: (options: { databasePath?: string; root?: string; includeTracks?: boolean }) => Promise<LibraryStatusSummary>;
+  libraryDuplicates?: (options: { databasePath?: string; root?: string }) => Promise<DuplicateGroup[]>;
 };
 
 export const HELP_TEXT = `Narada DJ — terminal-native local DJ
@@ -29,19 +41,26 @@ Usage:
   narada search "query"
   narada --library /path scan
   narada --library /path search "query"
+  narada library scan
+  narada library status
+  narada library duplicates
   narada console               interactive console (TTY only)
   narada demo                  console with a synthetic demo clock (TTY only)
   narada                       same as narada console
 
 Commands:
-  scan      Scan the library and list discovered tracks
+  scan      Scan into SQLite and print a summary (alias of library scan)
   search    Search title, artist, album, filename, and path
+  library   scan | status | duplicates
   console   Open the Narada terminal console
   demo      Open the console with synthetic playback and animation
 
 Options:
   --library <path>   Music library root (default: /home/hari007/Music)
   --help             Show this help
+
+Environment:
+  NARADA_DB          SQLite database path (default: ./data/narada.db)
 
 Safety:
   Read-only. Narada never moves, renames, deletes, or rewrites audio files.
@@ -60,6 +79,10 @@ function defaultDependencies(): MainDependencies {
     stderr: process.stderr,
     isTTY: Boolean(process.stdin.isTTY && process.stdout.isTTY),
     consoleRunner: defaultConsoleRunner,
+    databasePath: resolveDatabasePath(),
+    libraryScan: (options) => scanLibraryToDatabase(options),
+    libraryStatus: (options) => libraryStatus(options),
+    libraryDuplicates: (options) => libraryDuplicates(options),
   };
 }
 
@@ -93,7 +116,32 @@ async function catalogFor(root: string, deps: MainDependencies): Promise<{
   return catalog;
 }
 
+function writeDuplicates(deps: MainDependencies, groups: readonly DuplicateGroup[]): void {
+  if (groups.length === 0) return;
+  deps.stdout.write(`\nDuplicate content groups: ${groups.length}\n`);
+  for (const group of groups) {
+    deps.stdout.write(`  ${group.contentHash.slice(0, 16)}…\n`);
+    for (const track of group.tracks) deps.stdout.write(`    - ${track.path}\n`);
+  }
+}
+
+function writeScanSummary(deps: MainDependencies, summary: LibraryScanSummary): void {
+  deps.stdout.write(`Library: ${summary.root}\n`);
+  deps.stdout.write(`Database: ${summary.databasePath}\n`);
+  deps.stdout.write(`Tracks: ${summary.present}\n`);
+  deps.stdout.write(`Added: ${summary.added} · Updated: ${summary.updated} · Unchanged: ${summary.unchanged}\n`);
+  deps.stdout.write(`Missing: ${summary.missing} (newly marked ${summary.markedMissing}) · Errors: ${summary.errors} · Duplicate groups: ${summary.duplicates.length}\n`);
+  deps.stdout.write(`Warnings: ${summary.warnings.length}\n`);
+  writeDuplicates(deps, summary.duplicates);
+  writeWarnings(deps, summary.warnings);
+}
+
 async function runScan(root: string, deps: MainDependencies): Promise<number> {
+  if (deps.libraryScan !== undefined) {
+    const summary = await deps.libraryScan({ root, databasePath: deps.databasePath });
+    writeScanSummary(deps, summary);
+    return 0;
+  }
   const catalog = await catalogFor(root, deps);
   deps.stdout.write(`Library: ${root}\n`);
   deps.stdout.write(`Tracks: ${catalog.tracks.length}\n`);
@@ -105,6 +153,54 @@ async function runScan(root: string, deps: MainDependencies): Promise<number> {
     }
   }
   writeWarnings(deps, catalog.warnings);
+  return 0;
+}
+
+async function runLibrary(
+  action: "scan" | "status" | "duplicates",
+  root: string,
+  deps: MainDependencies,
+): Promise<number> {
+  if (action === "scan") {
+    if (deps.libraryScan === undefined) {
+      deps.stderr.write("Library database support is unavailable in this build.\n");
+      return 2;
+    }
+    const summary = await deps.libraryScan({ root, databasePath: deps.databasePath });
+    writeScanSummary(deps, summary);
+    return 0;
+  }
+
+  if (action === "duplicates") {
+    if (deps.libraryDuplicates === undefined) {
+      deps.stderr.write("Library database support is unavailable in this build.\n");
+      return 2;
+    }
+    const groups = await deps.libraryDuplicates({ databasePath: deps.databasePath, root });
+    if (groups.length === 0) deps.stdout.write("No duplicate content found.\n");
+    else writeDuplicates(deps, groups);
+    return 0;
+  }
+
+  if (deps.libraryStatus === undefined) {
+    deps.stderr.write("Library database support is unavailable in this build.\n");
+    return 2;
+  }
+  const status = await deps.libraryStatus({ databasePath: deps.databasePath, root });
+  if (!status.exists) {
+    deps.stdout.write(`No library database at ${status.databasePath}. Run: narada library scan\n`);
+    return 0;
+  }
+  deps.stdout.write(`Database: ${status.databasePath}\n`);
+  deps.stdout.write(`Schema: v${status.schemaVersion}\n`);
+  deps.stdout.write(`Tracks: ${status.counts.present} present · ${status.counts.missing} missing · ${status.counts.errors} errors · ${status.counts.total} total\n`);
+  deps.stdout.write(`Duplicate groups: ${status.duplicates.length}\n`);
+  if (status.lastScan !== undefined) {
+    deps.stdout.write(`Last scan: ${status.lastScan.finishedAt} · ${status.lastScan.filesSeen} files · ${status.lastScan.added} added · ${status.lastScan.updated} updated · ${status.lastScan.unchanged} unchanged\n`);
+  } else {
+    deps.stdout.write("Last scan: none\n");
+  }
+  writeDuplicates(deps, status.duplicates);
   return 0;
 }
 
@@ -165,6 +261,8 @@ export async function run(
       return runScan(options.libraryRoot, dependencies);
     case "search":
       return runSearch(options.libraryRoot, options.query, dependencies);
+    case "library":
+      return runLibrary(options.action, options.libraryRoot, dependencies);
     case "console":
     case "demo": {
       if (dependencies.consoleRunner === undefined) {
