@@ -1,4 +1,7 @@
 import { TerminalSession, type CliAction } from "../cli/terminal.js";
+import { PlaybackController } from "../player/controller.js";
+import type { PlaybackState } from "../player/types.js";
+import { VlcBackend } from "../player/vlcBackend.js";
 import { buildCatalog, type CatalogResult } from "../library/catalog.js";
 import { applyMode, getModes } from "../library/modes.js";
 import { probeTrack } from "../library/metadata.js";
@@ -36,6 +39,7 @@ export type NaradaConsoleOptions = {
   splashMs?: number;
   frameMs?: number;
   autoStartTimer?: boolean;
+  playback?: PlaybackController;
 };
 
 function shuffle<T>(items: readonly T[], seed: number): T[] {
@@ -69,7 +73,9 @@ export class NaradaConsole {
   private readonly frameMs: number;
   private readonly splashMs: number;
   private readonly autoStartTimer: boolean;
+  private readonly playback: PlaybackController | undefined;
   private readonly state: ConsoleState;
+  private lastPlaybackIndex = -1;
   private previousRows: string[] | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private started = false;
@@ -87,6 +93,7 @@ export class NaradaConsole {
     this.frameMs = options.frameMs ?? 90;
     this.splashMs = options.splashMs ?? 0;
     this.autoStartTimer = options.autoStartTimer ?? true;
+    this.playback = options.playback;
     this.state = createConsoleState({
       libraryRoot: this.libraryRoot,
       tracks: this.catalog.tracks,
@@ -95,6 +102,11 @@ export class NaradaConsole {
     });
     this.refreshModeCounts();
     this.selectFirstTrack();
+    if (this.playback !== undefined) {
+      this.state.volume = this.playback.getState().volume;
+      this.state.playback = "stopped";
+      this.playback.setQueue(this.state.queue, this.state.queueIndex);
+    }
     if (this.splashMs > 0) {
       this.splashRemainingMs = this.splashMs;
       this.state.playback = "loading";
@@ -127,6 +139,7 @@ export class NaradaConsole {
   }
 
   stop(): void {
+    void this.playback?.close();
     if (this.timer !== undefined) {
       clearInterval(this.timer);
       this.timer = undefined;
@@ -142,7 +155,16 @@ export class NaradaConsole {
     if (this.splashRemainingMs > 0) {
       this.splashRemainingMs = Math.max(0, this.splashRemainingMs - this.frameMs);
       if (this.splashRemainingMs === 0) {
-        this.state.playback = this.state.tracks.length > 0 ? "playing" : "stopped";
+        this.startPlaybackIfNeeded();
+      }
+    } else if (this.playback !== undefined) {
+      this.syncPlaybackState();
+      const active = this.state.playback === "playing";
+      this.state.energy = active ? syntheticEnergy(currentTrack(this.state), this.state.tick) : Math.max(0.05, this.state.energy * 0.98);
+      this.state.beat = active ? (this.state.tick % 8) / 8 : 0;
+      if (active && this.state.transition > 0) {
+        this.state.transition = Math.min(1, this.state.transition + 0.018);
+        if (this.state.transition >= 1) this.state.transition = 0;
       }
     } else if (this.state.playback === "playing") {
       this.state.position += this.frameMs / 1000;
@@ -255,7 +277,7 @@ export class NaradaConsole {
   private handleInput(action: CliAction, key: string): void {
     if (this.splashRemainingMs > 0) {
       this.splashRemainingMs = 0;
-      this.state.playback = this.state.tracks.length > 0 ? "playing" : "stopped";
+      this.startPlaybackIfNeeded();
       this.render();
       return;
     }
@@ -346,7 +368,13 @@ export class NaradaConsole {
         this.togglePause();
         break;
       case "play":
-        this.state.playback = "playing";
+        if (this.playback !== undefined) {
+          if (this.state.playback === "paused") void this.playback.resume();
+          else void this.playback.playIndex(this.state.queueIndex);
+          this.syncPlaybackState();
+        } else {
+          this.state.playback = "playing";
+        }
         break;
       case "next":
         this.nextTrack(1);
@@ -356,10 +384,12 @@ export class NaradaConsole {
         break;
       case "volumeUp":
         this.state.volume = Math.min(100, this.state.volume + 5);
+        void this.playback?.setVolume(this.state.volume);
         this.state.message = `Volume ${this.state.volume}`;
         break;
       case "volumeDown":
         this.state.volume = Math.max(0, this.state.volume - 5);
+        void this.playback?.setVolume(this.state.volume);
         this.state.message = `Volume ${this.state.volume}`;
         break;
       case "search":
@@ -418,12 +448,23 @@ export class NaradaConsole {
       this.state.queue = [...this.state.filtered];
       this.state.queueIndex = this.state.libraryIndex;
       this.state.queueSelection = this.state.queueIndex;
-      this.startTrack(track);
+      if (this.playback !== undefined) {
+        this.playback.setQueue(this.state.queue, this.state.queueIndex);
+        void this.playback.playIndex(this.state.queueIndex);
+        this.syncPlaybackState();
+      } else {
+        this.startTrack(track);
+      }
     } else {
       const track = selectedQueueTrack(this.state);
       if (track === undefined) return;
       this.state.queueIndex = this.state.queueSelection;
-      this.startTrack(track);
+      if (this.playback !== undefined) {
+        void this.playback.playIndex(this.state.queueIndex);
+        this.syncPlaybackState();
+      } else {
+        this.startTrack(track);
+      }
     }
   }
 
@@ -437,6 +478,12 @@ export class NaradaConsole {
   }
 
   private togglePause(): void {
+    if (this.playback !== undefined) {
+      void this.playback.togglePause();
+      this.syncPlaybackState();
+      this.state.message = this.state.playback === "paused" ? "Paused" : "Resumed";
+      return;
+    }
     if (this.state.playback === "playing") {
       this.state.playback = "paused";
       this.state.message = "Paused";
@@ -454,6 +501,13 @@ export class NaradaConsole {
 
   private nextTrack(delta: number): void {
     if (this.state.queue.length === 0) return;
+    if (this.playback !== undefined) {
+      void (delta > 0 ? this.playback.next() : this.playback.previous());
+      this.syncPlaybackState();
+      const track = currentTrack(this.state);
+      this.state.message = `${delta > 0 ? "Next" : "Previous"}: ${track?.title ?? ""}`;
+      return;
+    }
     this.state.queueIndex = (this.state.queueIndex + delta + this.state.queue.length) % this.state.queue.length;
     const track = currentTrack(this.state);
     if (track === undefined) return;
@@ -470,8 +524,14 @@ export class NaradaConsole {
     this.state.queue = shuffle(this.state.filtered, this.state.tick + 1);
     this.state.queueIndex = 0;
     this.state.queueSelection = 0;
-    const track = currentTrack(this.state);
-    if (track !== undefined) this.startTrack(track);
+    if (this.playback !== undefined) {
+      this.playback.setQueue(this.state.queue, 0);
+      void this.playback.playIndex(0);
+      this.syncPlaybackState();
+    } else {
+      const track = currentTrack(this.state);
+      if (track !== undefined) this.startTrack(track);
+    }
     this.state.message = "Queue shuffled";
   }
 
@@ -497,9 +557,54 @@ export class NaradaConsole {
     this.state.position = 0;
     this.state.duration = this.state.queue[0]?.durationSeconds ?? 0;
     this.state.bpm = syntheticBpm(this.state.queue[0]);
-    this.state.playback = this.state.queue.length > 0 ? "playing" : "stopped";
+    if (this.playback !== undefined) {
+      this.playback.setQueue(this.state.queue, 0);
+      if (this.state.queue.length > 0) void this.playback.playIndex(0);
+      else void this.playback.stop();
+      this.syncPlaybackState();
+    } else {
+      this.state.playback = this.state.queue.length > 0 ? "playing" : "stopped";
+    }
     this.state.message = result.explanation;
   }
+
+  private startPlaybackIfNeeded(): void {
+    if (this.playback === undefined) {
+      this.state.playback = this.state.tracks.length > 0 ? "playing" : "stopped";
+      return;
+    }
+    if (this.state.queue.length === 0) {
+      this.state.playback = "stopped";
+      return;
+    }
+    this.playback.setQueue(this.state.queue, this.state.queueIndex);
+    void this.playback.playIndex(this.state.queueIndex);
+    this.syncPlaybackState();
+  }
+
+  private syncPlaybackState(): void {
+    if (this.playback === undefined) return;
+    const snapshot = this.playback.getState();
+    if (snapshot.queue.length > 0) this.state.queue = snapshot.queue;
+    if (snapshot.index >= 0) {
+      if (snapshot.index !== this.lastPlaybackIndex) this.state.queueSelection = snapshot.index;
+      this.lastPlaybackIndex = snapshot.index;
+      this.state.queueIndex = snapshot.index;
+    }
+    this.state.playback = mapPlaybackStatus(snapshot.status);
+    this.state.position = snapshot.positionSeconds;
+    this.state.duration = snapshot.durationSeconds;
+    this.state.volume = snapshot.volume;
+    if (snapshot.error !== undefined) this.state.message = snapshot.error;
+    this.state.bpm = syntheticBpm(snapshot.track ?? currentTrack(this.state));
+  }
+}
+
+function mapPlaybackStatus(status: PlaybackState): ConsoleState["playback"] {
+  if (status === "playing") return "playing";
+  if (status === "paused") return "paused";
+  if (status === "error") return "error";
+  return "stopped";
 }
 
 export type RunConsoleOptions = {
@@ -512,6 +617,8 @@ export type RunConsoleOptions = {
   env?: Record<string, string | undefined>;
   splashMs?: number;
   autoStartTimer?: boolean;
+  playback?: PlaybackController;
+  enablePlayback?: boolean;
   loadCatalog?: (root: string) => Promise<CatalogResult>;
 };
 
@@ -530,6 +637,14 @@ export async function runConsole(options: RunConsoleOptions): Promise<number> {
     return buildCatalog(scan, (filePath) => probeTrack(filePath));
   }))(options.libraryRoot);
 
+  const shouldEnablePlayback = options.enablePlayback ?? !(options.demo ?? false);
+  const environment = options.env ?? process.env;
+  const playback = options.playback ?? (shouldEnablePlayback
+    ? new PlaybackController({
+      backend: new VlcBackend({ registry: terminal.getRegistry(), audioOutput: environment.NARADA_AOUT }),
+    })
+    : undefined);
+
   const console = new NaradaConsole({
     terminal,
     catalog,
@@ -538,8 +653,10 @@ export async function runConsole(options: RunConsoleOptions): Promise<number> {
     depth: detectColorDepth(options.env ?? process.env, true),
     splashMs: options.splashMs ?? 900,
     autoStartTimer: options.autoStartTimer ?? true,
+    playback,
   });
 
   await console.run();
+  await playback?.close();
   return 0;
 }

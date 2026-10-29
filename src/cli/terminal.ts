@@ -45,10 +45,10 @@ export interface TerminalOutput {
   removeListener?(event: "resize", listener: () => void): void;
 }
 
-export interface OwnedChild {
-  pid?: number;
-  kill(signal?: string | number): boolean;
-}
+import { ChildProcessRegistry, type OwnedChild } from "../process/childRegistry.js";
+
+export { ChildProcessRegistry };
+export type { OwnedChild };
 
 export type TerminalSessionOptions = {
   input: TerminalInput;
@@ -167,36 +167,6 @@ export class KeyParser {
   }
 }
 
-/**
- * Tracks only child processes started by Narada.
- *
- * The registry never discovers processes by name or PID, so an unrelated VLC
- * session is untouchable even when it is running at the same time.
- */
-export class ChildProcessRegistry {
-  private readonly children = new Set<OwnedChild>();
-
-  register(child: OwnedChild): void {
-    this.children.add(child);
-  }
-
-  unregister(child: OwnedChild): void {
-    this.children.delete(child);
-  }
-
-  async terminateOwned(): Promise<void> {
-    const owned = [...this.children];
-    this.children.clear();
-    for (const child of owned) {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        // The child may already have exited; cleanup is best-effort.
-      }
-    }
-  }
-}
-
 export class TerminalSession {
   private readonly input: TerminalInput;
   private readonly output: TerminalOutput;
@@ -223,6 +193,10 @@ export class TerminalSession {
 
   isInteractive(): boolean {
     return Boolean(this.input.isTTY && this.output.isTTY);
+  }
+
+  getRegistry(): ChildProcessRegistry {
+    return this.registry;
   }
 
   start(): boolean {

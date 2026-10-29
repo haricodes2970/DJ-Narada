@@ -2,6 +2,13 @@ import type { Track } from "../library/types.js";
 
 export type PlaybackState = "idle" | "playing" | "paused" | "stopped" | "error";
 
+export type BackendEvent =
+  | { type: "ended"; track: Track }
+  | { type: "error"; message: string; track?: Track }
+  | { type: "state"; state: PlaybackState };
+
+export type BackendEventHandler = (event: BackendEvent) => void;
+
 /**
  * Playback backend contract from `docs/PHASE_2_SPEC.md`.
  *
@@ -16,5 +23,6 @@ export interface PlaybackBackend {
   stop(): Promise<void>;
   setVolume(percent: number): Promise<void>;
   getState(): PlaybackState;
+  onEvent?(handler: BackendEventHandler): () => void;
   close(): Promise<void>;
 }

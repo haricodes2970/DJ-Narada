@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { TerminalSession, type TerminalInput, type TerminalOutput } from "../../src/cli/terminal.js";
 import type { Track } from "../../src/library/types.js";
+import { PlaybackController } from "../../src/player/controller.js";
+import { DummyBackend } from "../../src/player/dummyBackend.js";
 import { NaradaConsole } from "../../src/ui/console.js";
 import { EMBER_THEME } from "../../src/ui/theme.js";
 
@@ -83,7 +85,13 @@ const tracks: Track[] = [
   }),
 ];
 
-function setup(options: { columns?: number; rows?: number; splashMs?: number; frameMs?: number } = {}) {
+function setup(options: {
+  columns?: number;
+  rows?: number;
+  splashMs?: number;
+  frameMs?: number;
+  playback?: PlaybackController;
+} = {}) {
   const input = new FakeInput();
   const output = new FakeOutput();
   output.columns = options.columns ?? 120;
@@ -99,6 +107,7 @@ function setup(options: { columns?: number; rows?: number; splashMs?: number; fr
     splashMs: options.splashMs ?? 0,
     frameMs: options.frameMs ?? 90,
     autoStartTimer: false,
+    playback: options.playback,
   });
   return { input, output, terminal, console };
 }
@@ -140,6 +149,35 @@ test("console navigates the library and plays the selected track", () => {
   assert.equal(console.getState().queueIndex, 1);
   assert.match(console.getState().message, /Tum Hi Ho/);
   assert.match(console.renderToString(), /Tum Hi Ho/);
+});
+
+test("console drives a real playback controller when attached", async () => {
+  const backend = new DummyBackend();
+  const playback = new PlaybackController({ backend, queue: tracks });
+  const { console } = setup({ playback });
+  console.start();
+
+  console.dispatch("select", "\r");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(console.getState().playback, "playing");
+  assert.ok(backend.calls.includes("load:/music/hiphop/nanchaku.mp3"));
+  assert.ok(backend.calls.includes("play"));
+
+  console.dispatch("pause", " ");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(console.getState().playback, "paused");
+  assert.ok(backend.calls.includes("pause"));
+
+  console.dispatch("next", "n");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(console.getState().queueIndex, 1);
+  assert.ok(backend.calls.includes("load:/music/desi/tum-hi-ho.mp3"));
+
+  console.dispatch("volumeUp", "+");
+  assert.equal(console.getState().volume, 75);
+  assert.ok(backend.calls.includes("volume:75"));
+
+  await playback.close();
 });
 
 test("search overlay accepts text and applies a filter", () => {
