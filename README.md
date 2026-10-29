@@ -50,7 +50,7 @@ Phase 1 intentionally installs no dependencies. The current `package.json` descr
 ## Planned milestones
 
 1. Safe library structure and repository bootstrap.
-2. Library discovery and opt-in metadata/index design.
+2. Library discovery, metadata design, and deterministic in-memory catalog behavior.
 3. Audio-feature extraction and classifier research prototype.
 4. Simulated reinforcement-learning environment and baseline policies.
 5. Local beat-aware mixing engine.
