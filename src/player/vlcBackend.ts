@@ -147,6 +147,7 @@ export class VlcBackend implements PlaybackBackend {
   async play(): Promise<void> {
     if (this.child !== undefined) {
       if (this.state === "paused") await this.resume();
+      else if (this.state === "playing") this.write("play\n");
       return;
     }
     if (this.current !== undefined) {

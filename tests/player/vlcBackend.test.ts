@@ -84,6 +84,8 @@ test("VlcBackend spawns an owned RC process and sends initial volume", async () 
   assert.ok(args.includes("dummy"));
   assert.ok(args.includes(track.path));
   assert.equal(backend.getState(), "playing");
+  await backend.play();
+  assert.ok(fake.stdin.writes.includes("play\n"));
   assert.equal(registry.size(), 1);
   assert.ok(fake.stdin.writes.some((write) => write === "volume 154\n"));
   assert.ok(events.some((event) => event.type === "state" && event.state === "playing"));
