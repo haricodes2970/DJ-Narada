@@ -15,25 +15,61 @@ Scope: why the CLI feels broken despite green tests.
 | F | "you did not download transition assets" | Yes | `assets/transitions`, `assets/sound-effects`, `assets/avatar` are empty directories. | High |
 | G | Stars appear/disappear between runs | Yes | `resolveDatabasePath()` uses `path.resolve("data/narada.db")` → depends on cwd. Two DBs exist: `Music/DJ/data/narada.db` and `Music/data/narada.db`. | High |
 
-## A. Zero tracks on startup
+## A. Zero tracks on startup — ROOT CAUSE FOUND AND FIXED
 
-Evidence:
+**Actual root cause (confirmed by reproduction):** the native scanner helper was
+resolved with `path.resolve("dist/native/narada-scan")`, i.e. relative to the
+**current working directory**.
 
-- `src/ui/console.ts` constructor:
-  `const initialCategory = this.state.categories.find((c) => c.id !== "__all__") ?? ...`
-  Because the sort puts starred folders first, the first non-`ALL TRACKS` category is
-  often a starred folder. If that folder is empty, `queue = []` and every panel
-  shows 0.
-- `src/config/paths.ts`:
-  `export const DEFAULT_DATABASE_PATH = path.resolve("data/narada.db");`
-  Launch from `~/Music/DJ` → `DJ/data/narada.db`. Launch from `~/Music` →
-  `Music/data/narada.db`. Star sets therefore differ per launch directory, which
-  makes the "first category" differ per launch.
-- Not reproduced at 80x24 or 120x40 with a clean DB. So this is state-dependent,
-  not layout-dependent.
+```ts
+// src/library/scanner.ts (before)
+helper: path.resolve("dist/native/narada-scan"),
+```
 
-Additional contributing factor: a library with 33 tracks and 18 empty folders
-looks "zero" even when it is correct.
+Consequences:
+
+- Launch from `/home/hari007/Music/DJ` → helper found → 33 tracks.
+- Launch from `~`, `~/Music`, or any normal shell directory → `spawn ENOENT` →
+  scan returns zero files → **0 tracks, 0 queue, STOPPED**.
+- The desktop launcher did `cd /home/hari007/Music/DJ` first, which masked the bug.
+- Every verification I ran used `cd /home/hari007/Music/DJ`, which is why it never
+  showed up.
+
+Reproduced from `~/Music`:
+
+```json
+{"ok":true,"root":"/home/hari007/Music","tracks":0,"categories":19,"warnings":1}
+```
+
+After the fix, from `/home/hari007`:
+
+```json
+{"ok":true,"root":"/home/hari007/Music","tracks":33,"categories":19,"warnings":0}
+```
+
+Fix: resolve the helper from the module URL, with an env override.
+
+```ts
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+export const DEFAULT_SCAN_HELPER = path.resolve(MODULE_DIR, "../../native/narada-scan");
+// ...
+helper: process.env.NARADA_SCAN_HELPER ?? DEFAULT_SCAN_HELPER,
+```
+
+Regression test: `tests/library/scannerCwd.test.ts` scans a temp folder while
+`process.cwd()` is `/tmp`.
+
+**Secondary causes (still relevant, not yet changed in the CLI):**
+
+| Issue | Evidence |
+|---|---|
+| Startup picks the first starred folder even when it is empty → empty queue | `console.ts`: `categories.find(c => c.id !== "__all__")` |
+| Stars live in two different databases depending on launch directory | `paths.ts`: `path.resolve("data/narada.db")` is cwd-relative. Confirmed two DBs |
+| `data/` and `logs/` listed as categories | hard-coded `DJ` exclusion only |
+
+The web service (`narada serve`) already avoids the secondary issues: stable
+database path under `$XDG_DATA_HOME/narada`, and a non-music folder denylist.
+
 
 ## B. Mouse clicks
 

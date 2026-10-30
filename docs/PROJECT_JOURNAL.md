@@ -4,6 +4,42 @@ Living log. Newest entry first. Every entry: symptom → evidence → cause → 
 
 ---
 
+## 2026-10-30 — THE "zero tracks" bug: cwd-relative native helper
+
+**Symptom.** Owner launches Narada from a normal terminal and sees 0 tracks,
+0 queue, STOPPED. Reported three times.
+
+**Reproduction.** `cd ~/Music && narada serve` →
+`{"ok":true,"root":"/home/hari007/Music","tracks":0,"categories":19,"warnings":1}`.
+`cd ~/Music/DJ && narada serve` → 33 tracks.
+
+**Evidence.** `src/library/scanner.ts` used
+`helper: path.resolve("dist/native/narada-scan")`. That path is relative to
+`process.cwd()`. Outside the project directory the spawn fails, the scan returns
+zero files, and the UI shows an empty library.
+
+**Cause.** cwd-relative executable resolution, masked by every manual test that
+started with `cd /home/hari007/Music/DJ`, including the desktop launcher.
+
+**Action.** Resolve the helper from `import.meta.url`:
+
+```ts
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+export const DEFAULT_SCAN_HELPER = path.resolve(MODULE_DIR, "../../native/narada-scan");
+helper: process.env.NARADA_SCAN_HELPER ?? DEFAULT_SCAN_HELPER,
+```
+
+Regression test `tests/library/scannerCwd.test.ts` scans from an unrelated cwd.
+
+**Verified.** From `/home/hari007`: 33 tracks, 19 categories, 0 warnings; console
+plays `101.mp3`. Library later grew to 35 tracks when the owner added 2 Kannada
+songs.
+
+**Lesson.** Never trust a test whose setup `cd`s into the project. Launch paths are
+part of the product surface.
+
+---
+
 ## 2026-10-30 — Platform diagnosis, product direction challenged
 
 **Symptom.** Owner reports: launching Narada from a normal terminal shows zero

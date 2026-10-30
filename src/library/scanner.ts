@@ -1,8 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { runNativeScanner } from "./protocol.js";
 import type { ScanOptions, ScanResult } from "./types.js";
+
+/**
+ * Native scanner location resolved from this module, never from process.cwd().
+ *
+ * A cwd-relative helper path silently produced zero tracks whenever Narada was
+ * launched from outside the project directory.
+ */
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+export const DEFAULT_SCAN_HELPER = path.resolve(MODULE_DIR, "../../native/narada-scan");
 
 export const DEFAULT_EXCLUDED_ROOT = "/home/hari007/Music/DJ";
 export const DEFAULT_AUDIO_EXTENSIONS = new Set([
@@ -50,7 +60,7 @@ export async function scanLibrary(options: ScanOptions): Promise<ScanResult> {
     root,
     exclusions,
     extensionSet,
-    helper: path.resolve("dist/native/narada-scan"),
+    helper: process.env.NARADA_SCAN_HELPER ?? DEFAULT_SCAN_HELPER,
     initialWarnings: warnings,
   });
 }
