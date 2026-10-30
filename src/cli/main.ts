@@ -1,5 +1,5 @@
 import { ArgumentError, parseArgs } from "./commands.js";
-import { DEFAULT_LIBRARY_ROOT, resolveDatabasePath } from "../config/paths.js";
+import { DEFAULT_LIBRARY_ROOT, resolveDatabasePath, resolvePersistentDatabasePath } from "../config/paths.js";
 import type { DuplicateGroup } from "../db/tracks.js";
 import { storedTrackToTrack } from "../db/tracks.js";
 import { analyzeTracksWithCache, type AnalyzeTracksSummary } from "../analysis/cache.js";
@@ -34,6 +34,7 @@ export type MainDependencies = {
   libraryStatus?: (options: { databasePath?: string; root?: string; includeTracks?: boolean }) => Promise<LibraryStatusSummary>;
   libraryDuplicates?: (options: { databasePath?: string; root?: string }) => Promise<DuplicateGroup[]>;
   analyzeTracks?: (tracks: readonly Track[], options: { databasePath?: string }) => Promise<AnalyzeTracksSummary>;
+  serveRunner?: (options: { libraryRoot: string }) => Promise<number>;
 };
 
 export const HELP_TEXT = `Narada DJ — terminal-native local DJ
@@ -51,6 +52,7 @@ Usage:
   narada analyze
   narada console               interactive console (TTY only)
   narada demo                  console with a synthetic demo clock (TTY only)
+  narada serve                 local web UI service on 127.0.0.1
   narada                       same as narada console
 
 Commands:
@@ -60,6 +62,7 @@ Commands:
   analyze   Analyze present tracks and cache audio features
   console   Open the Narada terminal console
   demo      Open the console with synthetic playback and animation
+  serve     Start the local web service (API + audio streaming)
 
 Options:
   --library <path>   Music library root (default: /home/hari007/Music)
@@ -77,6 +80,27 @@ async function defaultConsoleRunner(options: { libraryRoot: string; demo: boolea
   return runConsole({ libraryRoot: options.libraryRoot, demo: options.demo });
 }
 
+async function defaultServeRunner(options: { libraryRoot: string }): Promise<number> {
+  const { startNaradaServer } = await import("../server/app.js");
+  const server = await startNaradaServer({
+    libraryRoot: options.libraryRoot,
+    port: Number(process.env.NARADA_PORT ?? "7070"),
+    databasePath: resolvePersistentDatabasePath(),
+  });
+  const token = server.token === undefined ? "" : `?token=${encodeURIComponent(server.token)}`;
+  process.stdout.write(`Narada service: ${server.url}/\n`);
+  process.stdout.write(`Library: ${options.libraryRoot}\n`);
+  process.stdout.write(`API token: ${server.token ?? "disabled"}\n`);
+  process.stdout.write(`Open ${server.url}/${token}\n`);
+  await new Promise<void>((resolve) => {
+    const stop = (): void => resolve();
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+  await server.close();
+  return 0;
+}
+
 function defaultDependencies(): MainDependencies {
   return {
     scanLibrary,
@@ -85,6 +109,7 @@ function defaultDependencies(): MainDependencies {
     stderr: process.stderr,
     isTTY: Boolean(process.stdin.isTTY && process.stdout.isTTY),
     consoleRunner: defaultConsoleRunner,
+    serveRunner: defaultServeRunner,
     databasePath: resolveDatabasePath(),
     libraryScan: (options) => scanLibraryToDatabase(options),
     libraryStatus: (options) => libraryStatus(options),
@@ -306,6 +331,13 @@ export async function run(
         libraryRoot: options.libraryRoot,
         demo: options.command === "demo",
       });
+    }
+    case "serve": {
+      if (dependencies.serveRunner === undefined) {
+        dependencies.stderr.write("Local service is unavailable in this build.\n");
+        return 2;
+      }
+      return dependencies.serveRunner({ libraryRoot: options.libraryRoot });
     }
   }
 }

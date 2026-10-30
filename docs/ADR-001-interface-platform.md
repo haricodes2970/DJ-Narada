@@ -1,7 +1,7 @@
 # ADR-001: Interface platform for Narada
 
 - Date: 2026-10-30
-- Status: Proposed (awaiting owner decision)
+- Status: Accepted (owner decision, 2026-10-30)
 - Supersedes: none
 
 ## Context

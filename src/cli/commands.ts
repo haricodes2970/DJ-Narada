@@ -6,6 +6,7 @@ export type CliOptions =
   | { command: "search"; query: string; libraryRoot: string }
   | { command: "console"; libraryRoot: string }
   | { command: "demo"; libraryRoot: string }
+  | { command: "serve"; libraryRoot: string }
   | { command: "analyze"; libraryRoot: string }
   | { command: "library"; action: "scan" | "status" | "duplicates" | "analyze"; libraryRoot: string };
 
@@ -66,7 +67,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
     return { command, query, libraryRoot };
   }
 
-  if (command === "console" || command === "demo" || command === "analyze") {
+  if (command === "console" || command === "demo" || command === "analyze" || command === "serve") {
     if (index + 1 < argv.length) {
       throw new ArgumentError("Only one command may be provided");
     }
