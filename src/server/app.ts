@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import { resolveDatabasePath } from "../config/paths.js";
+import { resolvePersistentDatabasePath } from "../config/paths.js";
 import { closeDatabase, openDatabase } from "../db/database.js";
+import { AnalysisRepository, DEFAULT_ANALYSIS_ALGORITHM, DEFAULT_ANALYSIS_VERSION } from "../analysis/cache.js";
+import { bpmFromFeatures, energyFromFeatures } from "../analysis/features.js";
 import { buildCatalog } from "../library/catalog.js";
 import { CategoryStarRepository } from "../library/categoryStars.js";
 import { ALL_TRACKS_CATEGORY, buildCategories, sortCategories, type LibraryCategory } from "../library/categories.js";
@@ -161,7 +163,7 @@ export async function startNaradaServer(options: NaradaServerOptions): Promise<N
   const loadLibrary = options.loadLibrary ?? defaultLoadLibrary;
   const staticRoot = path.resolve(options.staticRoot ?? DEFAULT_WEB_ROOT);
   const ownsDatabase = options.database === undefined;
-  const db = options.database ?? await openDatabase(options.databasePath ?? resolveDatabasePath());
+  const db = options.database ?? await openDatabase(options.databasePath ?? resolvePersistentDatabasePath());
   const stars = new CategoryStarRepository(db);
   let snapshot = await loadLibrary(options.libraryRoot);
   let trackPaths = new Set(snapshot.tracks.map((track) => track.path));
@@ -171,7 +173,30 @@ export async function startNaradaServer(options: NaradaServerOptions): Promise<N
     return { ...value, categories: sortCategories(value.categories.map((category) => ({ ...category, starred: starred.has(category.path) }))) };
   };
 
-  snapshot = withStars(snapshot);
+  /* Attach cached audio analysis (BPM + energy) so the DJ sequencer can make
+     producer-grade decisions: bpm-compatible picks, energy arcs, technique
+     selection. Tracks without analysis simply pass through untouched. Category
+     records keep their own track arrays, so those are remapped too. */
+  const analysis = new AnalysisRepository(db);
+  const withFeatures = (value: LibrarySnapshot): LibrarySnapshot => {
+    const tracks = value.tracks.map((track) => {
+      const features = analysis.getLatest(track.id, DEFAULT_ANALYSIS_ALGORITHM, DEFAULT_ANALYSIS_VERSION);
+      if (features === undefined) return track;
+      return {
+        ...track,
+        bpm: bpmFromFeatures(features) || undefined,
+        energy: energyFromFeatures(features),
+      };
+    });
+    const byId = new Map(tracks.map((track) => [track.id, track]));
+    const categories = value.categories.map((category) => ({
+      ...category,
+      tracks: category.tracks.map((track) => byId.get(track.id) ?? track),
+    }));
+    return { ...value, tracks, categories };
+  };
+
+  snapshot = withFeatures(withStars(snapshot));
 
   const authorized = (req: http.IncomingMessage, url: URL): boolean => {
     if (token === undefined) return true;
@@ -312,7 +337,7 @@ export async function startNaradaServer(options: NaradaServerOptions): Promise<N
           return;
         }
         const starred = stars.toggle(target);
-        snapshot = withStars(snapshot);
+        snapshot = withFeatures(withStars(snapshot));
         json(res, 200, { path: target, starred, stars: stars.list() });
         return;
       }
@@ -371,7 +396,7 @@ export async function startNaradaServer(options: NaradaServerOptions): Promise<N
       if (req.method === "POST" && url.pathname === "/api/refresh") {
         const fresh = await loadLibrary(options.libraryRoot);
         trackPaths = new Set(fresh.tracks.map((track) => track.path));
-        snapshot = withStars(fresh);
+        snapshot = withFeatures(withStars(fresh));
         json(res, 200, { tracks: snapshot.tracks.length, categories: snapshot.categories.length });
         return;
       }
@@ -400,7 +425,7 @@ export async function startNaradaServer(options: NaradaServerOptions): Promise<N
     refresh: async () => {
       const fresh = await loadLibrary(options.libraryRoot);
       trackPaths = new Set(fresh.tracks.map((track) => track.path));
-      snapshot = withStars(fresh);
+      snapshot = withFeatures(withStars(fresh));
       return snapshot;
     },
     close: async () => {

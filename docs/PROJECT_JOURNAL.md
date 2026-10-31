@@ -168,6 +168,50 @@ burst, poster pulse), random featured track per page load, defensive
 
 ---
 
+## 2026-10-31 — DJ producer engine v2 (research-backed rewrite)
+
+**Symptom.** User: "DJ mode completely messed up — all music plays 1–2 seconds
+then jumps around." 
+
+**Root cause (fixed in c24cfe3 first).** `playTransition` awaited only
+`stinger.play()` (start), while a global `stinger.ended` listener re-called
+`playNextRandom()` — every track died ~2 s after the previous clip finished.
+
+**Feature data.** `narada analyze` (existing CLI, proved out) ran the librosa
+Python worker over the library: 145/146 tracks analyzed (1 long jukebox
+timed out). Analysis lives in `analysis_runs`, keyed by path + algorithm.
+
+**Wiring.** Server now attaches `bpm`/`energy` to every `/api/tracks` payload
+from the analysis cache. Two bugs fixed on the way:
+- /api/tracks?category served *category copies* of tracks, not the decorated
+  snapshot — `withFeatures` now remaps category track arrays (id → new track).
+- The attach raced a rebuild once; confirmed via a temporary dist log.
+
+**Sequencer v2 (web/app.js), per DJ research (Native Instruments, Pioneer DJ,
+DJ TechTools, vibesdj):**
+- Technique selection by BPM distance: ≤5 → 8-bar smooth blend with bass-swap
+  EQ (lowshelf 240 Hz; incoming bass cut −30 dB, swap at the handoff);
+  5–12 → echo out (delay per beat, tail rings over three steps); >12/unknown
+  → radio drop through a stinger clip awaited to completion.
+- Track choice scores energy arc (lift/breathe flips) + BPM compatibility +
+  randomness, under artist/cooldown filters, top-3 shortlist.
+- Web Audio decks upgraded: gain → bass EQ → master, plus echo send
+  (delay + 0.38 feedback).
+
+**On "train a DL/RL model".** Rejected with evidence: no legal transition
+dataset exists (mixes are copyrighted), GPU-bound, and a rules engine built
+on documented DJ techniques is deterministic and auditable. The user's
+"messed up" experience was a plain logic bug, not missing intelligence.
+
+**Verification.** node --check ✓, 228 tests ✓, headless autostart: DJ mode
+plays Kahnada set, spectrum reactive, zero console errors, no rapid chopping
+(the chop bug needs a long observed session; visible behavior correct).
+
+**Follow-ups.** Stinger clip timing only on 'drop' technique; blend
+bar-alignment is approximate (no downbeat detection); per-category DJ pool.
+
+---
+
 ## Standing rules
 
 1. Never modify files under `/home/hari007/Music/SeedheMauth`.

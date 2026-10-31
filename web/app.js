@@ -24,11 +24,12 @@ const state = {
   xfade: Number(localStorage.getItem("narada.xfade") ?? 4),
   recent: [],
   frame: 0,
+  dj: { arc: 0.12 },
   transitions: [],
   stingerGain: null,
 };
 
-const decks = [0, 1].map(() => ({ audio: new Audio(), gain: null, timer: 0 }));
+const decks = [0, 1].map(() => ({ audio: new Audio(), gain: null, bass: null, send: null, delay: null, timer: 0 }));
 const stinger = new Audio();
 let activeDeck = 0;
 let ctx = null;
@@ -104,9 +105,31 @@ function ensureAudio() {
     const source = ctx.createMediaElementSource(deck.audio);
     const gain = ctx.createGain();
     gain.gain.value = 0;
+    /* Bass EQ per deck — the producer engine swaps bass at the handoff. */
+    const bass = ctx.createBiquadFilter();
+    bass.type = "lowshelf";
+    bass.frequency.value = 240;
+    bass.gain.value = 0;
     source.connect(gain);
-    gain.connect(master);
+    gain.connect(bass);
+    bass.connect(master);
     deck.gain = gain;
+    deck.bass = bass;
+
+    /* Echo send — "echo out" transitions: outgoing track rings into the
+       delay tail while the incoming track takes over underneath. */
+    const send = ctx.createGain();
+    send.gain.value = 0;
+    const delay = ctx.createDelay(3);
+    const feedback = ctx.createGain();
+    feedback.gain.value = 0.38;
+    gain.connect(send);
+    send.connect(delay);
+    delay.connect(master);
+    delay.connect(feedback);
+    feedback.connect(delay);
+    deck.send = send;
+    deck.delay = delay;
   }
 }
 
@@ -124,6 +147,8 @@ function stopDeck(deck) {
   deck.audio.removeAttribute("src");
   deck.audio.load();
   if (deck.gain !== null) deck.gain.gain.value = 0;
+  if (deck.bass !== null) deck.bass.gain.value = 0;
+  if (deck.send !== null) deck.send.gain.value = 0;
 }
 
 function bindDeck(deck, index) {
@@ -176,37 +201,136 @@ function enterDJMode() {
   }
 }
 
-async function playNextRandom() {
-  if (state.queue.length === 0) return;
-  const count = state.queue.length;
-  if (count === 1) {
-    await playIndex(0, { fadeMs: 900 });
-    return;
-  }
+/* ---------------- DJ producer engine ----------------
+   Technique selection follows real DJ practice:
+   - |ΔBPM| ≤ 5   → smooth blend, bass swap at the handoff
+   - 5 < |ΔBPM| ≤ 12 → echo out: outgoing tail rings while next lands
+   - |ΔBPM| > 12 / unknown → radio drop (stinger clip / hard crossfade)
+   Track choice scores BPM compatibility + an energy arc so sets breathe
+   instead of maxing out. */
 
-  const current = state.queue[state.index];
+const BLEND_BEAT_MS = () => {
+  /* Quarter-note length for blend math; 122 BPM default when unknown. */
+  return 60 / 122 * 1000;
+};
+
+function techniqueFor(current, next) {
+  const bpmA = Number(current?.bpm);
+  const bpmB = Number(next?.bpm);
+  if (!Number.isFinite(bpmA) || !Number.isFinite(bpmB) || bpmA <= 0 || bpmB <= 0) {
+    return state.transitions.length > 0 ? "drop" : "blend";
+  }
+  const delta = Math.abs(bpmA - bpmB);
+  if (delta <= 5) return "blend";
+  if (delta <= 12) return "echo";
+  return "drop";
+}
+
+function pickNextTrack(currentTrack) {
+  const count = state.queue.length;
+  if (count === 1) return 0;
+
   const cooldown = Math.min(6, count - 1);
   const blocked = new Set(state.recent.slice(-cooldown));
   const pool = [];
   for (let i = 0; i < count; i += 1) {
     if (i === state.index || blocked.has(i)) continue;
     const candidate = state.queue[i];
-    if (count > 6 && current?.artist !== undefined && candidate.artist === current.artist) continue;
+    if (count > 6 && currentTrack?.artist !== undefined && candidate.artist === currentTrack.artist) continue;
     pool.push(i);
   }
-  const candidates = pool.length > 0 ? pool : state.queue.map((_, i) => i).filter((i) => i !== state.index);
-  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+  const fallbackPool = pool.length > 0 ? pool : state.queue.map((_, i) => i).filter((i) => i !== state.index);
+
+  const targetEnergy = Number(currentTrack?.energy);
+  const bpmA = Number(currentTrack?.bpm);
+  const scored = fallbackPool.map((index) => {
+    const track = state.queue[index];
+    let energyScore = 0;
+    if (Number.isFinite(targetEnergy) && Number.isFinite(Number(track.energy))) {
+      /* Arc keep alive: drift toward or away from the current energy. */
+      const goal = Math.max(0.05, Math.min(1, targetEnergy + state.dj.arc));
+      energyScore = 1 - Math.abs(track.energy - goal);
+    }
+    let bpmScore = 0;
+    if (Number.isFinite(bpmA) && Number.isFinite(Number(track.bpm)) && bpmA > 0 && track.bpm > 0) {
+      bpmScore = Math.max(0, 1 - Math.abs(bpmA - track.bpm) / 40);
+    }
+    return { index, score: energyScore * 0.45 + bpmScore * 0.3 + Math.random() * 0.25 };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const shortlist = scored.slice(0, Math.min(3, scored.length));
+  const chosen = shortlist[Math.floor(Math.random() * shortlist.length)].index;
+
   state.recent.push(chosen);
   while (state.recent.length > 10) state.recent.shift();
 
-  if (state.mode === "dj" && state.transitions.length > 0) {
+  /* Flip the arc occasionally so the set settles as well as lifts. */
+  if (Math.random() < 0.2) state.dj.arc = -state.dj.arc;
+
+  return chosen;
+}
+
+async function playNextRandom() {
+  if (state.queue.length === 0) return;
+  if (state.fading) return;
+
+  const currentTrack = state.queue[state.index] ?? null;
+  const chosen = pickNextTrack(currentTrack);
+  if (state.queue.length === 1) {
+    await playIndex(0, { fadeMs: 900 });
+    return;
+  }
+
+  const nextTrack = state.queue[chosen];
+  const style = techniqueFor(currentTrack, nextTrack);
+
+  if (style === "drop" && state.transitions.length > 0) {
     state.fading = true;
     const transition = state.transitions[Math.floor(Math.random() * state.transitions.length)];
     await playTransition(transition.path, transition.name);
+    state.fading = false;
+    await playIndex(chosen, { fadeMs: 900 });
+    return;
   }
 
+  if (style === "echo") {
+    state.fading = true;
+    const tail = echoOut(decks[activeDeck], Number(currentTrack?.bpm));
+    await new Promise((resolve) => window.setTimeout(resolve, tail * 1000 + 900));
+    const outgoing = decks[activeDeck];
+    stopDeck(outgoing);
+    state.fading = false;
+    await playIndex(chosen, { fadeMs: 500 });
+    toast(`🎚️ echo out → ${nextTrack.title}`);
+    return;
+  }
+
+  /* Smooth blend, stretched and aligned to musical bars when BPM is known. */
+  state.fading = true;
+  const bpm = Number(currentTrack?.bpm);
+  const barMs = Number.isFinite(bpm) && bpm > 30 ? (60 / bpm) * 4 * 1000 : BLEND_BEAT_MS() * 4;
+  const bars = Number.isFinite(bpm) && bpm > 30 ? 8 : 2;
+  const fadeMs = Math.min(12000, Math.max(state.xfade * 1000, barMs * bars, 2000));
   state.fading = false;
-  await playIndex(chosen, { fadeMs: 1200 });
+  await playIndex(chosen, { fadeMs, blend: true });
+}
+
+/* Echo out: route the outgoing deck into its delay, duck the dry gain and
+   let the tail ring for ~3 steps. Returns tail length in seconds. */
+function echoOut(deck, bpm) {
+  const step = Number.isFinite(bpm) && bpm > 30 ? Math.min(1.5, 60 / bpm) : 0.5;
+  if (deck.delay !== null && deck.send !== null) {
+    deck.delay.delayTime.value = step / 2;
+    const now = ctx.currentTime;
+    deck.send.gain.cancelScheduledValues(now);
+    deck.send.gain.setValueAtTime(0, now);
+    deck.send.gain.linearRampToValueAtTime(0.85, now + 0.06);
+    ramp(deck.gain.gain, 0, step * 1000);
+  } else if (deck.gain !== null) {
+    ramp(deck.gain.gain, 0, step * 1000);
+  }
+  deck.timer = window.setTimeout(() => stopDeck(deck), step * 1000 * 3);
+  return step * 2;
 }
 
 /* ---------------- transitions ---------------- */
@@ -264,7 +388,7 @@ async function playTransition(url, label) {
 
 /* ---------------- playback ---------------- */
 
-async function playIndex(index, { fadeMs = 0 } = {}) {
+async function playIndex(index, { fadeMs = 0, blend = false } = {}) {
   const track = state.queue[index];
   if (track === undefined) return;
   ensureAudio();
@@ -296,11 +420,21 @@ async function playIndex(index, { fadeMs = 0 } = {}) {
   if (overlap) {
     ramp(next.gain.gain, 1, fadeMs);
     ramp(previous.gain.gain, 0, fadeMs);
+    if (options.blend === true) {
+      /* Bass swap: incoming low are cut while both play, then swap －
+         two bass lines at once sound like mud (EQ mixing principle). */
+      if (next.bass !== null) next.bass.gain.value = -30;
+      if (previous.bass !== null) ramp(previous.bass.gain, -34, fadeMs * 0.5);
+      window.setTimeout(() => {
+        if (next.bass !== null) ramp(next.bass.gain, 0, Math.max(40, fadeMs * 0.45));
+      }, fadeMs * 0.45);
+    }
     previous.timer = window.setTimeout(() => stopDeck(previous), fadeMs + 60);
   } else {
     if (previous.gain !== null) previous.gain.gain.value = 0;
     previous.timer = window.setTimeout(() => stopDeck(previous), 40);
     if (next.gain !== null) next.gain.gain.value = 1;
+    if (next.bass !== null) next.bass.gain.value = 0;
   }
 
   activeDeck = nextIndex;

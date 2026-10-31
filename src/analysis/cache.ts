@@ -65,6 +65,27 @@ export class AnalysisRepository {
     }
   }
 
+  /** Latest successful features for a track regardless of source hash. Used
+      when the caller has no content hash (e.g. streams built by probe only). */
+  getLatest(trackId: string, algorithm: string, algorithmVersion: string): AudioFeatures | undefined {
+    const row = this.db
+      .prepare(`
+        SELECT values_json FROM analysis_runs
+        WHERE track_id = ? AND algorithm = ? AND algorithm_version = ?
+          AND error_message IS NULL
+        ORDER BY id DESC LIMIT 1
+      `)
+      .get(trackId, algorithm, algorithmVersion);
+    if (row === undefined) return undefined;
+    const values = (row as Record<string, unknown>).values_json;
+    if (typeof values !== "string") return undefined;
+    try {
+      return normalizeAudioFeatures(JSON.parse(values));
+    } catch {
+      return undefined;
+    }
+  }
+
   record(input: AnalysisRecordInput): number {
     const result = this.db
       .prepare(`
