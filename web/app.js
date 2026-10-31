@@ -145,16 +145,9 @@ function bindDeck(deck, index) {
 }
 decks.forEach(bindDeck);
 
-stinger.addEventListener("ended", () => {
-  if (!state.playing || state.mode !== "dj") return;
-  void playNextRandom();
-});
-stinger.addEventListener("error", () => {
-  if (state.mode === "dj") {
-    state.fading = false;
-    void playNextRandom();
-  }
-});
+/* The stinger clip is awaited inside playTransition — no global listeners,
+   otherwise the clip end re-triggers playNextRandom and every track gets
+   chopped after ~2 seconds. */
 
 /* ---------------- queue + randomization ---------------- */
 
@@ -228,29 +221,44 @@ async function loadTransitions() {
   }
 }
 
+/* Stinger playback that resolves only when the clip has actually FINISHED
+   (or failed). Transitions are fire-and-wait — the next track starts after
+   the drop, never on top of it. Safety timeout guards against a clip that
+   never fires `ended` (e.g. browser throttling). */
+function playStingerClip(url) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(safety);
+      stinger.removeEventListener("ended", finish);
+      stinger.removeEventListener("error", finish);
+      resolve();
+    };
+    const safety = window.setTimeout(finish, 15000);
+    stinger.addEventListener("ended", finish);
+    stinger.addEventListener("error", finish);
+    stinger.src = url + (token.length > 0 ? `?token=${token}` : "");
+    stinger.load();
+    stinger.play().catch(finish);
+  });
+}
+
 async function playTransition(url, label) {
   ensureAudio();
-  if (ctx.state === "suspended") await ctx.resume();
-
-  stinger.src = url + (token.length > 0 ? `?token=${token}` : "");
-  stinger.load();
-  try {
-    await stinger.play();
-  } catch {
-    state.fading = false;
-    return;
+  if (ctx.state === "suspended") {
+    try { await ctx.resume(); } catch { /* retried by playIndex */ }
   }
 
+  /* Fade the outgoing deck under the drop, then let it end. */
   const previous = decks[activeDeck];
-  if (previous.gain !== null) {
-    ramp(previous.gain.gain, 0, 700);
-  }
-  const duration = stinger.duration;
+  if (previous.gain !== null) ramp(previous.gain.gain, 0, 700);
   window.clearTimeout(previous.timer);
-  previous.timer = window.setTimeout(() => {
-    stopDeck(previous);
-  }, Math.max(100, (duration ?? 2) * 1000 + 200));
+  previous.timer = window.setTimeout(() => stopDeck(previous), 760);
 
+  await playStingerClip(url);
+  stopDeck(previous);
   toast(`🎙️ ${label}`);
 }
 
@@ -318,7 +326,7 @@ function maybeCrossfade() {
 }
 
 async function advance(shuffle = true) {
-  if (state.queue.length === 0) return;
+  if (state.queue.length === 0 || state.fading) return;
   if (state.mode === "dj") {
     void playNextRandom();
     return;
