@@ -142,6 +142,32 @@ every milestone (`sha256sum -c`). Files are treated as read-only fixtures.
 
 ---
 
+## 2026-10-31 — TUNE IN dead click: root cause found
+
+**Symptom.** User: "tune in click not working, nothing happens." Screenshots of
+the landing page also showed the featured track panel empty.
+
+**Root cause.** `web/app.js` contained **TypeScript syntax** (`as const`,
+`type Mode = ...`, `url: string` param annotations) but is a plain `.js` file
+served raw to the browser. The parser threw a SyntaxError on load, so the
+entire module never executed — no click handler, no fetches, nothing. Earlier
+`--dump-dom` "verification" only matched static HTML strings, which masked it.
+
+**Second bug.** Even after fixing syntax, `enter()` awaited
+`ctx.resume()` *before* switching pages. Without a user gesture the resume
+promise stays pending, so the page switch never ran. Fixed by switching pages
+first (`landing.hidden = true; radio.hidden = false;` above any audio work).
+
+**Evidence.** Headless dump after fix: `landing hidden=""`, `radio` visible,
+"ON AIR" present, NOW PLAYING populated. `node --check web/app.js` now passes
+(was SyntaxError at line 13).
+
+**Also added.** Landing pixel-art FX (flickering lanterns, scanlines, glow
+burst, poster pulse), random featured track per page load, defensive
+`safeListen()` wiring, `window.__naradaEnter` fallback on the button.
+
+---
+
 ## Standing rules
 
 1. Never modify files under `/home/hari007/Music/SeedheMauth`.

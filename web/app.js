@@ -10,11 +10,10 @@ const AVATAR_FRAMES = [
   "/assets/avatar/frame4.png",
 ];
 
-const MODES = ["dj", "fm", "manual"] as const;
-type Mode = typeof MODES[number];
+const MODES = ["dj", "fm", "manual"];
 
 const state = {
-  mode: localStorage.getItem("narada.mode") as Mode ?? "dj",
+  mode: localStorage.getItem("narada.mode") ?? "dj",
   library: null,
   queue: [],
   index: -1,
@@ -25,8 +24,8 @@ const state = {
   xfade: Number(localStorage.getItem("narada.xfade") ?? 4),
   recent: [],
   frame: 0,
-  transitions: [] as { name: string; path: string }[],
-  stingerGain: null as GainNode | null,
+  transitions: [],
+  stingerGain: null,
 };
 
 const decks = [0, 1].map(() => ({ audio: new Audio(), gain: null, timer: 0 }));
@@ -159,7 +158,7 @@ stinger.addEventListener("error", () => {
 
 /* ---------------- queue + randomization ---------------- */
 
-function shuffleQueue(source: Track[]) {
+function shuffleQueue(source) {
   const result = [...source];
   for (let i = result.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -229,7 +228,7 @@ async function loadTransitions() {
   }
 }
 
-async function playTransition(url: string, label: string) {
+async function playTransition(url, label) {
   ensureAudio();
   if (ctx.state === "suspended") await ctx.resume();
 
@@ -594,9 +593,17 @@ function startAvatarLoop() {
 
 /* ---------------- wiring ---------------- */
 
+function safeListen(el, event, handler) {
+  if (!el) return;
+  try { el.addEventListener(event, handler); } catch { /* listener may already exist */ }
+}
+
 function wire() {
-  $("enter").addEventListener("click", () => { void enter(); });
-  document.addEventListener("keydown", (event) => {
+  const enterBtn = $("enter");
+  safeListen(enterBtn, "click", () => { void enter(); });
+  window.__naradaEnter = enter;
+
+  safeListen(document, "keydown", (event) => {
     if (!$("landing").hidden && event.key === "Enter") {
       event.preventDefault();
       void enter();
@@ -611,36 +618,38 @@ function wire() {
     else if (event.key === "m" || event.key === "M") { event.preventDefault(); void cycleMode(); }
   });
 
-  $("mode").addEventListener("click", () => { void cycleMode(); });
-  $("play").addEventListener("click", () => { void togglePlay(); });
-  $("next").addEventListener("click", () => { void advance(); });
-  $("prev").addEventListener("click", () => { void previous(); });
+  safeListen($("mode"), "click", () => { void cycleMode(); });
+  safeListen($("play"), "click", () => { void togglePlay(); });
+  safeListen($("next"), "click", () => { void advance(); });
+  safeListen($("prev"), "click", () => { void previous(); });
 
-  $("seek").addEventListener("input", (event) => {
+  safeListen($("seek"), "input", (event) => {
     const audio = decks[activeDeck].audio;
     if (!Number.isFinite(audio.duration)) return;
     audio.currentTime = (Number(event.target.value) / 1000) * audio.duration;
   });
 
-  $("volume").value = String(state.volume);
-  $("volume-value").textContent = String(state.volume);
-  $("volume").addEventListener("input", (event) => {
+  const volumeInput = $("volume");
+  safeListen(volumeInput, "input", (event) => {
     state.volume = Number(event.target.value);
     localStorage.setItem("narada.volume", String(state.volume));
     $("volume-value").textContent = String(state.volume);
     if (master !== null) master.gain.value = state.volume / 100;
   });
+  if (volumeInput) volumeInput.value = String(state.volume);
+  $("volume-value").textContent = String(state.volume);
 
-  $("xfade").value = String(state.xfade);
-  $("xfade-value").textContent = `${state.xfade}s`;
-  $("xfade").addEventListener("input", (event) => {
+  const xfadeInput = $("xfade");
+  safeListen(xfadeInput, "input", (event) => {
     state.xfade = Number(event.target.value);
     localStorage.setItem("narada.xfade", String(state.xfade));
     $("xfade-value").textContent = `${state.xfade}s`;
   });
+  if (xfadeInput) xfadeInput.value = String(state.xfade);
+  $("xfade-value").textContent = `${state.xfade}s`;
 
   for (const tab of document.querySelectorAll(".tab")) {
-    tab.addEventListener("click", () => {
+    safeListen(tab, "click", () => {
       for (const other of document.querySelectorAll(".tab")) other.classList.toggle("is-active", other === tab);
       const name = tab.dataset.tab;
       $("panel-categories").hidden = name !== "categories";
@@ -689,23 +698,26 @@ async function loadRandomLandingTrack() {
 }
 
 async function enter() {
-  try {
-    ensureAudio();
+  /* Switch pages FIRST — never gate navigation on audio state */
+  $("landing").hidden = true;
+  $("radio").hidden = false;
+
+  ensureAudio();
+  if (ctx && ctx.state === "suspended") {
     try {
-      if (ctx && ctx.state === "suspended") await ctx.resume();
+      await ctx.resume();
     } catch {
-      /* Audio may need a gesture; we still show the radio and retry on play */
+      /* No gesture yet — retried when the user presses play */
     }
+  }
 
-    $("landing").hidden = true;
-    $("radio").hidden = false;
+  try {
+    await Promise.all([loadLibrary(), loadTransitions()]);
+  } catch (error) {
+    toast(`Library unavailable: ${error.message}`);
+  }
 
-    try {
-      await Promise.all([loadLibrary(), loadTransitions()]);
-    } catch (error) {
-      toast(`Library unavailable: ${error.message}`);
-    }
-
+  try {
     const categories = state.library?.categories ?? [];
     const remembered = categories.find((category) => category.id === state.categoryId);
     const fallback = categories.find((category) => category.id !== "__all__" && category.trackCount > 0) ?? categories[0];
@@ -713,9 +725,6 @@ async function enter() {
     if (target !== undefined) await selectCategory(target.id);
     syncTransport();
   } catch (error) {
-    // Last resort: make sure the user is never stuck on the landing page
-    $("landing").hidden = true;
-    $("radio").hidden = false;
     toast(`Start failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

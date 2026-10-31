@@ -124,6 +124,115 @@ kbd {
   pointer-events: none;
 }
 
+/* Pixel art FX overlay — animated lanterns, scanlines, screen flicker */
+.landing__fx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.fx-lantern {
+  position: absolute;
+  width: 20px;
+  height: 34px;
+  background: var(--ember);
+  border: 2px solid var(--line);
+  box-shadow: 0 0 12px var(--ember);
+  border-radius: 2px;
+  z-index: 1;
+}
+
+.fx-lantern--left {
+  top: 12%;
+  left: 6%;
+  animation: lantern-flicker 3s ease-in-out infinite alternate;
+}
+
+.fx-lantern--right {
+  top: 12%;
+  right: 6%;
+  animation: lantern-flicker 4s ease-in-out infinite alternate-reverse;
+}
+
+.fx-lantern::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 8px;
+  background: #04060e;
+}
+
+.fx-lantern::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: #ffd966;
+  border: 2px solid var(--line);
+  border-top: none;
+}
+
+@keyframes lantern-flicker {
+  0%, 100% { opacity: 1; box-shadow: 0 0 12px var(--ember); }
+  25% { opacity: 0.85; box-shadow: 0 0 6px var(--ember); }
+  50% { opacity: 1; box-shadow: 0 0 18px var(--ember); }
+  75% { opacity: 0.9; box-shadow: 0 0 8px var(--ember); }
+}
+
+.fx-scanlines {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0) 50%,
+    rgba(0, 0, 0, 0.25) 50%,
+    rgba(0, 0, 0, 0.25)
+  );
+  background-size: 100% 4px;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.35;
+}
+
+.fx-flicker {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.02);
+  animation: screen-flicker 0.15s infinite alternate;
+  opacity: 0;
+}
+
+@keyframes screen-flicker {
+  0% { opacity: 0; }
+  100% { opacity: 0.04; }
+}
+
+/* Random extra flicker bursts */
+.landing__fx::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 122, 47, 0.03);
+  pointer-events: none;
+  z-index: 2;
+  animation: glow-burst 5s ease-in-out infinite;
+}
+
+@keyframes glow-burst {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.06; }
+}
+
 .landing__scrim {
   position: absolute;
   inset: auto 0 0 0;

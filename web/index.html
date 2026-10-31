@@ -12,6 +12,15 @@
 
 <section id="landing" class="landing">
   <div class="landing__poster" role="img" aria-label="Pixel art: Narada playing a sarod on a beach at sunset"></div>
+
+  <!-- Pixel art animated overlay elements -->
+  <div class="landing__fx">
+    <div class="fx-lantern fx-lantern--left"></div>
+    <div class="fx-lantern fx-lantern--right"></div>
+    <div class="fx-scanlines"></div>
+    <div class="fx-flicker"></div>
+  </div>
+
   <div class="landing__scrim"></div>
   <div class="landing__content">
     <p class="landing__eyebrow" id="landing-meta">LOCAL RADIO · TUNING…</p>
@@ -25,7 +34,7 @@
       </div>
     </section>
 
-    <button id="enter" class="btn btn--hero" type="button">
+    <button id="enter" class="btn btn--hero" type="button" onclick="window.__naradaEnter?.()">
       <span class="btn__glyph" aria-hidden="true">▶</span> TUNE IN
     </button>
     <p class="landing__hint">or press <kbd>ENTER</kbd></p>
