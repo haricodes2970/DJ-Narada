@@ -83,6 +83,7 @@ function toast(message) {
 function ensureAudio() {
   if (ctx !== null) return;
   const AudioCtor = window.AudioContext ?? window.webkitAudioContext;
+  if (!AudioCtor) return;
   ctx = new AudioCtor();
   master = ctx.createGain();
   master.gain.value = state.volume / 100;
@@ -667,30 +668,56 @@ async function cycleMode() {
   }
 }
 
-async function enter() {
-  ensureAudio();
+async function loadRandomLandingTrack() {
   try {
-    if (ctx.state === "suspended") await ctx.resume();
+    const data = await api("/api/tracks");
+    const tracks = data.tracks ?? [];
+    if (tracks.length === 0) return;
+    const track = tracks[Math.floor(Math.random() * tracks.length)];
+    $("landing-artist").textContent = track.artist ?? "Unknown artist";
+    $("landing-title").textContent = track.title;
+    const art = $("landing-art");
+    art.replaceChildren();
+    const img = document.createElement("img");
+    img.src = "/assets/avatar/frame1.png";
+    img.alt = "Now";
+    img.draggable = false;
+    art.append(img);
   } catch {
-    /* Audio may need a gesture; we still show the radio and retry on play */
+    // Silent — landing still works without a featured track
   }
+}
 
-  $("landing").hidden = true;
-  $("radio").hidden = false;
-
+async function enter() {
   try {
-    await Promise.all([loadLibrary(), loadTransitions()]);
-  } catch (error) {
-    toast(`Library unavailable: ${error.message}`);
-    return;
-  }
+    ensureAudio();
+    try {
+      if (ctx && ctx.state === "suspended") await ctx.resume();
+    } catch {
+      /* Audio may need a gesture; we still show the radio and retry on play */
+    }
 
-  const categories = state.library.categories;
-  const remembered = categories.find((category) => category.id === state.categoryId);
-  const fallback = categories.find((category) => category.id !== "__all__" && category.trackCount > 0) ?? categories[0];
-  const target = remembered ?? fallback;
-  if (target !== undefined) await selectCategory(target.id);
-  syncTransport();
+    $("landing").hidden = true;
+    $("radio").hidden = false;
+
+    try {
+      await Promise.all([loadLibrary(), loadTransitions()]);
+    } catch (error) {
+      toast(`Library unavailable: ${error.message}`);
+    }
+
+    const categories = state.library?.categories ?? [];
+    const remembered = categories.find((category) => category.id === state.categoryId);
+    const fallback = categories.find((category) => category.id !== "__all__" && category.trackCount > 0) ?? categories[0];
+    const target = remembered ?? fallback;
+    if (target !== undefined) await selectCategory(target.id);
+    syncTransport();
+  } catch (error) {
+    // Last resort: make sure the user is never stuck on the landing page
+    $("landing").hidden = true;
+    $("radio").hidden = false;
+    toast(`Start failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 async function bootstrap() {
@@ -701,6 +728,7 @@ async function bootstrap() {
   try {
     const health = await api("/api/health");
     $("landing-meta").textContent = `LOCAL RADIO · ${health.tracks} TRACKS · ${health.categories} CATEGORIES`;
+    await loadRandomLandingTrack();
   } catch (error) {
     $("landing-meta").textContent = "SERVICE OFFLINE — is narada running?";
     toast(`Service error: ${error.message}`);

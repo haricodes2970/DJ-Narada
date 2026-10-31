@@ -102,6 +102,26 @@ kbd {
   inset: 0;
   background: url("/assets/poster.png") center / cover no-repeat;
   image-rendering: pixelated;
+  animation: poster-pulse 6s ease-in-out infinite;
+}
+
+@keyframes poster-pulse {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.02); filter: brightness(1.15) saturate(1.1); }
+}
+
+.landing__poster::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.03) 2px,
+    rgba(255, 255, 255, 0.03) 4px
+  );
+  pointer-events: none;
 }
 
 .landing__scrim {
@@ -131,6 +151,84 @@ kbd {
   font-size: var(--step--1);
   letter-spacing: 0.14em;
   color: var(--gold);
+}
+
+.landing__now {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: var(--space-xs);
+  align-items: center;
+  text-align: left;
+  width: 100%;
+  max-width: 520px;
+  padding: var(--space-xs) var(--space-s);
+  background: rgba(11, 17, 38, 0.85);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pixel);
+  animation: now-slide 0.6s var(--ease-out) both;
+}
+
+@keyframes now-slide {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.landing__now-label {
+  font-family: var(--font-display);
+  font-size: var(--step--1);
+  letter-spacing: 0.12em;
+  color: var(--gold);
+  grid-column: 1 / -1;
+}
+
+.landing__now-art {
+  width: 72px;
+  height: 72px;
+  border: 2px solid var(--gold);
+  background: #0a1024;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  animation: art-bounce 3s ease-in-out infinite;
+}
+
+@keyframes art-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.landing__now-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform: scale(1.15);
+}
+
+.landing__now-meta {
+  min-width: 0;
+}
+
+.landing__now-artist {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--ink-2);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.landing__now-title {
+  margin: var(--space-3xs) 0 0;
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  line-height: 1.35;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .landing__hint,
