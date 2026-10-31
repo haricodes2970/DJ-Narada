@@ -84,14 +84,14 @@ async function defaultServeRunner(options: { libraryRoot: string }): Promise<num
   const { startNaradaServer } = await import("../server/app.js");
   const server = await startNaradaServer({
     libraryRoot: options.libraryRoot,
-    port: Number(process.env.NARADA_PORT ?? "7070"),
+    port: Number(process.env.NARADA_PORT ?? "20130"),
     databasePath: resolvePersistentDatabasePath(),
   });
   const token = server.token === undefined ? "" : `?token=${encodeURIComponent(server.token)}`;
-  process.stdout.write(`Narada service: ${server.url}/\n`);
-  process.stdout.write(`Library: ${options.libraryRoot}\n`);
-  process.stdout.write(`API token: ${server.token ?? "disabled"}\n`);
-  process.stdout.write(`Open ${server.url}/${token}\n`);
+  process.stdout.write(`Narada DJ: ${server.url}/\n`);
+  process.stdout.write(`Library:   ${options.libraryRoot}\n`);
+  process.stdout.write(`Token:     ${server.token ?? "disabled"}\n`);
+  process.stdout.write(`Fallback:  ${server.url}/${token}\n`);
   await new Promise<void>((resolve) => {
     const stop = (): void => resolve();
     process.once("SIGINT", stop);

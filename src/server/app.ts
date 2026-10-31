@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -16,6 +17,9 @@ import type { ScanWarning, Track } from "../library/types.js";
 
 /** First-level folders that hold application data, never music. */
 export const NON_MUSIC_FOLDERS = new Set(["DJ", "data", "logs", "node_modules", ".git"]);
+
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+export const DEFAULT_WEB_ROOT = path.resolve(MODULE_DIR, "../../../web");
 
 export type LibrarySnapshot = {
   root: string;
@@ -34,6 +38,8 @@ export type NaradaServerOptions = {
   database?: DatabaseSync;
   loadLibrary?: (root: string) => Promise<LibrarySnapshot>;
   assetRoot?: string;
+  /** Directory containing index.html, app.js, styles.css, assets/. */
+  staticRoot?: string;
 };
 
 export type NaradaServer = {
@@ -53,6 +59,21 @@ const CONTENT_TYPES: Record<string, string> = {
   ".aac": "audio/aac",
   ".ogg": "audio/ogg",
   ".opus": "audio/ogg",
+};
+
+const STATIC_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".ico": "image/x-icon",
 };
 
 async function defaultLoadLibrary(root: string): Promise<LibrarySnapshot> {
@@ -137,6 +158,7 @@ export async function startNaradaServer(options: NaradaServerOptions): Promise<N
   const host = options.host ?? "127.0.0.1";
   const token = options.token === null ? undefined : options.token ?? randomBytes(18).toString("base64url");
   const loadLibrary = options.loadLibrary ?? defaultLoadLibrary;
+  const staticRoot = path.resolve(options.staticRoot ?? DEFAULT_WEB_ROOT);
   const ownsDatabase = options.database === undefined;
   const db = options.database ?? await openDatabase(options.databasePath ?? resolveDatabasePath());
   const stars = new CategoryStarRepository(db);
@@ -200,11 +222,39 @@ export async function startNaradaServer(options: NaradaServerOptions): Promise<N
     createReadStream(resolved).pipe(res);
   };
 
+  const serveWeb = async (res: http.ServerResponse, url: URL): Promise<void> => {
+    let relative = decodeURIComponent(url.pathname);
+    if (relative === "" || relative === "/") relative = "/index.html";
+    const filePath = path.resolve(staticRoot, `.${relative}`);
+    if (!isInside(staticRoot, filePath)) {
+      json(res, 404, { error: "Not found" });
+      return;
+    }
+    let body: Buffer;
+    try {
+      body = await fs.readFile(filePath);
+    } catch {
+      json(res, 404, { error: "Not found" });
+      return;
+    }
+    const isIndex = path.basename(filePath) === "index.html";
+    if (isIndex && token !== undefined) {
+      body = Buffer.from(body.toString("utf8").replaceAll("__NARADA_TOKEN__", token));
+    }
+    res.writeHead(200, {
+      "content-type": STATIC_TYPES[path.extname(filePath).toLowerCase()] ?? "application/octet-stream",
+      "content-length": body.length,
+      "cache-control": isIndex ? "no-store" : "public, max-age=3600",
+    });
+    res.end(body);
+  };
+
   const handler = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? "/", `http://${host}`);
     try {
       if (!url.pathname.startsWith("/api/")) {
-        json(res, 404, { error: "Not found" });
+        if (req.method === "GET") await serveWeb(res, url);
+        else json(res, 405, { error: "Method not allowed" });
         return;
       }
       if (!authorized(req, url)) {

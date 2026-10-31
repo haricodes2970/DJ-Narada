@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="narada-token" content="__NARADA_TOKEN__">
+<title>Narada DJ — local radio</title>
+<link rel="icon" href="/assets/avatar/frame1.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<section id="landing" class="landing">
+  <div class="landing__poster" role="img" aria-label="Pixel art: Narada playing a sarod on a beach at sunset"></div>
+  <div class="landing__scrim"></div>
+  <div class="landing__content">
+    <p class="landing__eyebrow" id="landing-meta">LOCAL RADIO · TUNING…</p>
+    <button id="enter" class="btn btn--hero" type="button">
+      <span class="btn__glyph" aria-hidden="true">▶</span> TUNE IN
+    </button>
+    <p class="landing__hint">or press <kbd>ENTER</kbd></p>
+    <p class="landing__note">Narayan Narayan · your files, your beach</p>
+  </div>
+</section>
+
+<main id="radio" class="radio" hidden>
+  <div class="radio__bg" aria-hidden="true"></div>
+  <div class="radio__scan" aria-hidden="true"></div>
+
+  <aside class="rail rail--left" aria-label="Now playing">
+    <img class="logo" src="/assets/logo.png" alt="Narada DJ" draggable="false">
+
+    <section class="panel now">
+      <h2 class="panel__title"><span aria-hidden="true">♫</span> NOW PLAYING</h2>
+      <div class="now__body">
+        <div class="avatar" id="avatar" data-frame="0">
+          <img id="avatar-img" src="/assets/avatar/frame1.png" alt="Narada avatar" draggable="false">
+        </div>
+        <div class="now__meta">
+          <p class="now__artist" id="np-artist">—</p>
+          <p class="now__title" id="np-title">—</p>
+          <p class="now__album" id="np-album"></p>
+        </div>
+      </div>
+      <div class="progress" aria-hidden="true">
+        <div class="progress__fill" id="progress-fill"></div>
+      </div>
+      <div class="progress__labels">
+        <span id="t-cur">0:00</span>
+        <span id="t-dur">0:00</span>
+      </div>
+      <canvas id="spectrum" class="spectrum" width="640" height="96" aria-hidden="true"></canvas>
+    </section>
+  </aside>
+
+  <section class="stage" aria-hidden="true">
+    <div class="stage__badge" id="stage-badge">ON AIR</div>
+    <div class="stage__caption">
+      <span id="stage-title">—</span>
+      <span class="stage__dots">·</span>
+      <span id="stage-artist">—</span>
+    </div>
+  </section>
+
+  <aside class="rail rail--right" aria-label="Library and queue">
+    <nav class="panel tabs" aria-label="Panels">
+      <button class="tab is-active" type="button" data-tab="categories">▤ LIBRARY</button>
+      <button class="tab" type="button" data-tab="queue">≡ QUEUE</button>
+    </nav>
+
+    <section class="panel list" id="panel-categories" aria-label="Categories">
+      <h2 class="panel__title">CATEGORIES</h2>
+      <div class="list__body" id="categories"></div>
+    </section>
+
+    <section class="panel list" id="panel-queue" aria-label="Queue" hidden>
+      <h2 class="panel__title">UP NEXT</h2>
+      <div class="list__body" id="queue"></div>
+    </section>
+
+    <div class="panel volume">
+      <span class="volume__label">VOL</span>
+      <input id="volume" class="range" type="range" min="0" max="100" value="70" aria-label="Volume">
+      <span class="volume__value" id="volume-value">70</span>
+    </div>
+  </aside>
+
+  <footer class="transport" aria-label="Transport">
+    <div class="transport__buttons">
+      <button id="prev" class="btn btn--icon" type="button" aria-label="Previous track">⏮</button>
+      <button id="play" class="btn btn--play" type="button" aria-label="Play">▶</button>
+      <button id="next" class="btn btn--icon" type="button" aria-label="Next track">⏭</button>
+    </div>
+
+    <div class="seek">
+      <span class="seek__time" id="seek-cur">0:00</span>
+      <input id="seek" class="range range--seek" type="range" min="0" max="1000" value="0" aria-label="Seek">
+      <span class="seek__time" id="seek-dur">0:00</span>
+    </div>
+
+    <label class="xfade" for="xfade">
+      <span>XFADE</span>
+      <input id="xfade" class="range range--xfade" type="range" min="0" max="8" step="1" value="4">
+      <span id="xfade-value">4s</span>
+    </label>
+  </footer>
+</main>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
