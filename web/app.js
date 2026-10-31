@@ -10,7 +10,11 @@ const AVATAR_FRAMES = [
   "/assets/avatar/frame4.png",
 ];
 
+const MODES = ["dj", "fm", "manual"] as const;
+type Mode = typeof MODES[number];
+
 const state = {
+  mode: localStorage.getItem("narada.mode") as Mode ?? "dj",
   library: null,
   queue: [],
   index: -1,
@@ -21,10 +25,12 @@ const state = {
   xfade: Number(localStorage.getItem("narada.xfade") ?? 4),
   recent: [],
   frame: 0,
-  lastScroll: 0,
+  transitions: [] as { name: string; path: string }[],
+  stingerGain: null as GainNode | null,
 };
 
 const decks = [0, 1].map(() => ({ audio: new Audio(), gain: null, timer: 0 }));
+const stinger = new Audio();
 let activeDeck = 0;
 let ctx = null;
 let master = null;
@@ -87,6 +93,13 @@ function ensureAudio() {
   analyser.connect(ctx.destination);
   freq = new Uint8Array(analyser.frequencyBinCount);
 
+  const stingerGain = ctx.createGain();
+  stingerGain.gain.value = 1;
+  const stingerSource = ctx.createMediaElementSource(stinger);
+  stingerSource.connect(stingerGain);
+  stingerGain.connect(master);
+  state.stingerGain = stingerGain;
+
   for (const deck of decks) {
     const source = ctx.createMediaElementSource(deck.audio);
     const gain = ctx.createGain();
@@ -124,13 +137,122 @@ function bindDeck(deck, index) {
   });
   deck.audio.addEventListener("ended", () => {
     if (index !== activeDeck || !state.playing) return;
-    if (!state.fading) void advance(true);
+    if (!state.fading) void advance();
   });
   deck.audio.addEventListener("error", () => {
     if (index === activeDeck) toast("Cannot play this file");
   });
 }
 decks.forEach(bindDeck);
+
+stinger.addEventListener("ended", () => {
+  if (!state.playing || state.mode !== "dj") return;
+  void playNextRandom();
+});
+stinger.addEventListener("error", () => {
+  if (state.mode === "dj") {
+    state.fading = false;
+    void playNextRandom();
+  }
+});
+
+/* ---------------- queue + randomization ---------------- */
+
+function shuffleQueue(source: Track[]) {
+  const result = [...source];
+  for (let i = result.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+/* Fisher-Yates shuffle gives a different order every time DJ mode starts. */
+function enterDJMode() {
+  const source = state.queue.length > 0 ? state.queue : (state.library?.tracks ?? []);
+  state.queue = shuffleQueue(source);
+  state.index = -1;
+  state.recent = [];
+  renderQueue();
+  if (state.queue.length > 0) {
+    void playIndex(0, { fadeMs: 300 });
+  } else {
+    state.playing = false;
+    syncTransport();
+    toast("No tracks in DJ queue");
+  }
+}
+
+async function playNextRandom() {
+  if (state.queue.length === 0) return;
+  const count = state.queue.length;
+  if (count === 1) {
+    await playIndex(0, { fadeMs: 900 });
+    return;
+  }
+
+  const current = state.queue[state.index];
+  const cooldown = Math.min(6, count - 1);
+  const blocked = new Set(state.recent.slice(-cooldown));
+  const pool = [];
+  for (let i = 0; i < count; i += 1) {
+    if (i === state.index || blocked.has(i)) continue;
+    const candidate = state.queue[i];
+    if (count > 6 && current?.artist !== undefined && candidate.artist === current.artist) continue;
+    pool.push(i);
+  }
+  const candidates = pool.length > 0 ? pool : state.queue.map((_, i) => i).filter((i) => i !== state.index);
+  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+  state.recent.push(chosen);
+  while (state.recent.length > 10) state.recent.shift();
+
+  if (state.mode === "dj" && state.transitions.length > 0) {
+    state.fading = true;
+    const transition = state.transitions[Math.floor(Math.random() * state.transitions.length)];
+    await playTransition(transition.path, transition.name);
+  }
+
+  state.fading = false;
+  await playIndex(chosen, { fadeMs: 1200 });
+}
+
+/* ---------------- transitions ---------------- */
+
+async function loadTransitions() {
+  try {
+    const data = await api("/api/dj/transitions");
+    state.transitions = data.transitions ?? [];
+    toast(`${state.transitions.length} DJ transitions loaded`);
+  } catch {
+    state.transitions = [];
+  }
+}
+
+async function playTransition(url: string, label: string) {
+  ensureAudio();
+  if (ctx.state === "suspended") await ctx.resume();
+
+  stinger.src = url + (token.length > 0 ? `?token=${token}` : "");
+  stinger.load();
+  try {
+    await stinger.play();
+  } catch {
+    state.fading = false;
+    return;
+  }
+
+  const previous = decks[activeDeck];
+  if (previous.gain !== null) {
+    ramp(previous.gain.gain, 0, 700);
+  }
+  const duration = stinger.duration;
+  window.clearTimeout(previous.timer);
+  previous.timer = window.setTimeout(() => {
+    stopDeck(previous);
+  }, Math.max(100, (duration ?? 2) * 1000 + 200));
+
+  toast(`🎙️ ${label}`);
+}
 
 /* ---------------- playback ---------------- */
 
@@ -182,42 +304,26 @@ async function playIndex(index, { fadeMs = 0 } = {}) {
 }
 
 function maybeCrossfade() {
-  if (!state.playing || state.fading || state.queue.length < 2 || state.xfade <= 0) return;
+  if (state.mode !== "dj" || !state.playing || state.fading || state.queue.length < 2 || state.xfade <= 0)
+    return;
   const audio = decks[activeDeck].audio;
   if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
   const remaining = audio.duration - audio.currentTime;
   if (remaining > state.xfade || remaining <= 0.05) return;
 
   state.fading = true;
-  const nextIndex = pickNextIndex();
-  void playIndex(nextIndex, { fadeMs: state.xfade * 1000 }).finally(() => {
+  void playNextRandom().finally(() => {
     window.setTimeout(() => { state.fading = false; }, state.xfade * 1000 + 120);
   });
 }
 
-function pickNextIndex() {
-  const count = state.queue.length;
-  if (count <= 1) return 0;
-  const current = state.queue[state.index];
-  const cooldown = Math.min(6, count - 1);
-  const blocked = new Set(state.recent.slice(-cooldown));
-  const pool = [];
-  for (let i = 0; i < count; i += 1) {
-    if (i === state.index || blocked.has(i)) continue;
-    const candidate = state.queue[i];
-    if (count > 6 && current?.artist !== undefined && candidate.artist === current.artist) continue;
-    pool.push(i);
-  }
-  const candidates = pool.length > 0 ? pool : state.queue.map((_, i) => i).filter((i) => i !== state.index);
-  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-  state.recent.push(chosen);
-  while (state.recent.length > 10) state.recent.shift();
-  return chosen;
-}
-
 async function advance(shuffle = true) {
   if (state.queue.length === 0) return;
-  const nextIndex = shuffle ? pickNextIndex() : (state.index + 1) % state.queue.length;
+  if (state.mode === "dj") {
+    void playNextRandom();
+    return;
+  }
+  const nextIndex = shuffle ? (state.index + 1) % state.queue.length : (state.index + 1) % state.queue.length;
   await playIndex(nextIndex, { fadeMs: 1200 });
 }
 
@@ -233,7 +339,12 @@ async function previous() {
 
 async function togglePlay() {
   ensureAudio();
-  if (ctx.state === "suspended") await ctx.resume();
+  try {
+    if (ctx.state === "suspended") await ctx.resume();
+  } catch {
+    toast("Audio needs a user gesture — click Play again");
+    return;
+  }
 
   if (state.playing) {
     decks[activeDeck].audio.pause();
@@ -243,12 +354,20 @@ async function togglePlay() {
   }
 
   if (state.index < 0) {
+    if (state.mode === "dj") {
+      void enterDJMode();
+      return;
+    }
     if (state.queue.length > 0) await playIndex(0);
     return;
   }
 
   const audio = decks[activeDeck].audio;
   if (!audio.src) {
+    if (state.mode === "dj") {
+      void enterDJMode();
+      return;
+    }
     await playIndex(state.index);
     return;
   }
@@ -325,7 +444,6 @@ function renderQueue() {
     const row = document.createElement("button");
     row.type = "button";
     row.className = `row row--track${index === state.index ? " is-current" : ""}`;
-    row.innerHTML = "";
     const number = document.createElement("span");
     number.className = "row__index";
     number.textContent = index === state.index ? "▶" : String(index + 1).padStart(2, "0");
@@ -342,6 +460,10 @@ function renderQueue() {
 }
 
 function syncTransport() {
+  const modeBtn = $("mode");
+  modeBtn.className = `btn btn--mode${state.mode === "dj" ? " is-dj" : state.mode === "manual" ? " is-manual" : ""}`;
+  modeBtn.textContent = state.mode.toUpperCase();
+  modeBtn.setAttribute("aria-label", `${state.mode} mode`);
   $("play").textContent = state.playing ? "❚❚" : "▶";
   $("play").setAttribute("aria-label", state.playing ? "Pause" : "Play");
   $("stage-badge").textContent = state.playing ? "ON AIR" : "STANDBY";
@@ -395,7 +517,9 @@ async function selectCategory(id) {
   state.recent = [];
   renderCategories();
   renderQueue();
-  if (state.queue.length > 0) {
+  if (state.mode === "dj") {
+    void enterDJMode();
+  } else if (state.queue.length > 0) {
     await playIndex(0, { fadeMs: 500 });
   } else {
     state.playing = false;
@@ -483,8 +607,10 @@ function wire() {
     if (event.key === " ") { event.preventDefault(); void togglePlay(); }
     else if (event.key === "ArrowRight") { event.preventDefault(); void advance(); }
     else if (event.key === "ArrowLeft") { event.preventDefault(); void previous(); }
+    else if (event.key === "m" || event.key === "M") { event.preventDefault(); void cycleMode(); }
   });
 
+  $("mode").addEventListener("click", () => { void cycleMode(); });
   $("play").addEventListener("click", () => { void togglePlay(); });
   $("next").addEventListener("click", () => { void advance(); });
   $("prev").addEventListener("click", () => { void previous(); });
@@ -522,15 +648,38 @@ function wire() {
   }
 }
 
+async function cycleMode() {
+  const current = MODES.indexOf(state.mode);
+  const next = MODES[(current + 1) % MODES.length];
+  state.mode = next;
+  localStorage.setItem("narada.mode", state.mode);
+  syncTransport();
+
+  if (state.mode === "dj") {
+    void enterDJMode();
+    toast("DJ MODE — shuffled session started");
+  } else if (state.mode === "manual") {
+    state.playing = false;
+    syncTransport();
+    toast("MANUAL MODE — pick any track");
+  } else {
+    toast("FM MODE — coming soon");
+  }
+}
+
 async function enter() {
   ensureAudio();
-  if (ctx.state === "suspended") await ctx.resume();
+  try {
+    if (ctx.state === "suspended") await ctx.resume();
+  } catch {
+    /* Audio may need a gesture; we still show the radio and retry on play */
+  }
 
   $("landing").hidden = true;
   $("radio").hidden = false;
 
   try {
-    await loadLibrary();
+    await Promise.all([loadLibrary(), loadTransitions()]);
   } catch (error) {
     toast(`Library unavailable: ${error.message}`);
     return;

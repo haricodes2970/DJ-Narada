@@ -200,6 +200,21 @@ kbd {
 
 .btn--play:hover { background: var(--gold); color: #241503; }
 
+.btn--mode {
+  width: 64px;
+  height: 40px;
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  letter-spacing: 0.12em;
+  background: var(--surface-2);
+  color: var(--gold);
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow-pixel);
+}
+
+.btn--mode.is-dj { background: #241503; color: var(--ember); border-color: var(--ember); }
+.btn--mode.is-manual { background: #0d2415; color: var(--teal); border-color: var(--teal); }
+
 /* ---------- Radio shell ---------- */
 
 .radio {

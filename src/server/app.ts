@@ -20,6 +20,7 @@ export const NON_MUSIC_FOLDERS = new Set(["DJ", "data", "logs", "node_modules", 
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_WEB_ROOT = path.resolve(MODULE_DIR, "../../../web");
+export const DJ_TRANSITIONS_DIR = path.resolve(MODULE_DIR, "../../../web/assets/dj/transitions");
 
 export type LibrarySnapshot = {
   root: string;
@@ -313,6 +314,58 @@ export async function startNaradaServer(options: NaradaServerOptions): Promise<N
         const starred = stars.toggle(target);
         snapshot = withStars(snapshot);
         json(res, 200, { path: target, starred, stars: stars.list() });
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/dj/transitions") {
+        let files: string[];
+        try {
+          files = await fs.readdir(DJ_TRANSITIONS_DIR);
+        } catch {
+          files = [];
+        }
+        const transitions = files
+          .filter((f) => /\.(m4a|mp3|wav|ogg)$/i.test(f))
+          .map((f) => ({ name: f, path: `/api/dj/transition?file=${encodeURIComponent(f)}` }));
+        json(res, 200, { transitions });
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/api/dj/transition") {
+        const file = url.searchParams.get("file");
+        if (typeof file !== "string" || file.length === 0) {
+          json(res, 400, { error: "Missing file" });
+          return;
+        }
+        const resolved = path.resolve(DJ_TRANSITIONS_DIR, file);
+        if (!isInside(DJ_TRANSITIONS_DIR, resolved)) {
+          json(res, 403, { error: "Forbidden" });
+          return;
+        }
+        let size: number;
+        try {
+          size = (await fs.stat(resolved)).size;
+        } catch {
+          json(res, 404, { error: "Transition not found" });
+          return;
+        }
+        const type = CONTENT_TYPES[path.extname(resolved).toLowerCase()] ?? "audio/mpeg";
+        const rangeHeader = req.headers.range;
+        const range = typeof rangeHeader === "string" ? parseRange(rangeHeader, size) : undefined;
+        if (range !== undefined) {
+          res.writeHead(206, {
+            "content-type": type,
+            "content-length": range.end - range.start + 1,
+            "content-range": `bytes ${range.start}-${range.end}/${size}`,
+            "accept-ranges": "bytes",
+          });
+          createReadStream(resolved, { start: range.start, end: range.end }).pipe(res);
+          return;
+        }
+        res.writeHead(200, {
+          "content-type": type,
+          "content-length": size,
+          "accept-ranges": "bytes",
+        });
+        createReadStream(resolved).pipe(res);
         return;
       }
       if (req.method === "POST" && url.pathname === "/api/refresh") {
